@@ -11,6 +11,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
+const BOT_NAME = process.env.BOT_NAME.toLowerCase(); // Add your bot's trigger name in the .env file
 const chatHistory = {};
 const audioPlayers = {};
 
@@ -64,15 +65,22 @@ async function sendAudioToAPI(fileName, userId, connection) {
   formData.append('file', fs.createReadStream(fileName));
 
   try {
-    const response = await axios.post(process.env.STT_ENDPOINT+'/v1/audio/transcriptions', formData, {
-      headers: {
-        ...formData.getHeaders(),
-      },
-    });
-    const transcription = response.data.text;
-    sendToLLM(transcription, userId, connection);
+      const response = await axios.post(process.env.STT_ENDPOINT + '/v1/audio/transcriptions', formData, {
+          headers: {
+              ...formData.getHeaders(),
+          },
+      });
+      const transcription = response.data.text;
+      console.log(`Transcription for ${userId}: "${transcription}"`);
+
+      // Check if the transcription includes the bot's name
+      if (transcription.toLowerCase().includes(BOT_NAME)) {
+          sendToLLM(transcription, userId, connection);
+      } else {
+          console.log("Bot was not addressed directly. Ignoring the command.");
+      }
   } catch (error) {
-    console.error('Failed to transcribe audio:', error);
+      console.error('Failed to transcribe audio:', error);
   }
 }
 
