@@ -60,11 +60,11 @@ function listenToUserAudio(connection, member) {
 
 async function sendAudioToAPI(fileName, userId, connection) {
   const formData = new FormData();
-  formData.append('model', 'whisper-1');
+  formData.append('model', process.env.STT_MODEL);
   formData.append('file', fs.createReadStream(fileName));
 
   try {
-    const response = await axios.post('http://192.168.1.54:7860/v1/audio/transcriptions', formData, {
+    const response = await axios.post(process.env.STT_ENDPOINT+'/v1/audio/transcriptions', formData, {
       headers: {
         ...formData.getHeaders(),
       },
@@ -84,8 +84,8 @@ async function sendToLLM(transcription, userId, connection) {
   });
 
   try {
-    const response = await axios.post('http://192.168.1.74:11434/api/chat', {
-      model: 'Lexi-Llama-3-8B-Uncensored_Q5_K_M.gguf:latest',
+    const response = await axios.post(process.env.LLM_ENDPOINT+'/api/chat', {
+      model: process.env.LLM,
       messages: messages,
       stream: false
     });
@@ -109,10 +109,10 @@ async function sendToLLM(transcription, userId, connection) {
 
 async function sendToTTS(text, connection) {
   try {
-    const response = await axios.post('http://192.168.1.74:8022/v1/audio/speech', {
-      model: "tts-1-hd",
+    const response = await axios.post(process.env.TTS_ENDPOINT+'/v1/audio/speech', {
+      model: process.env.TTS_MODEL,
       input: text,
-      voice: "shylily3",
+      voice: process.env.TTS_VOICE,
       response_format: "mp3",
       speed: 1.0
     }, {
