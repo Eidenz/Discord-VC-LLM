@@ -6,7 +6,7 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 
 - Node.js and npm installed
 - A Discord Bot Token
-- Access to custom APIs for STT (Speech to Text), LLM, and TTS services
+- Access to OpenAI compatible APIs for STT (Speech to Text), LLM, and TTS services (for fully local, checkout `openedai-whisper`, `ollama` and `openedai-speech`)
 
 ## Installation
 
@@ -36,11 +36,12 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 
 3. **Using the Bot in Discord:**
 - Ensure the bot has permission to join voice channels and speak.
-- In a Discord server where the bot is a member, join a voice channel and type the command `>join`.
+- In a Discord server where the bot is a member, join a voice channel and type the command `>join` or `>join free`.
 - The bot will join the channel and start listening to users who are speaking. Spoken phrases are processed and responded to in real-time.
 
 ## Commands
-- `>join`: Command for the bot to join the voice channel you are currently in. The bot will listen to voice input, transcribe it, send it to the LLM, and respond with a spoken answer using TTS.
+- `>join`: Command for the bot to join the voice channel you are currently in. The bot will listen to voice input, transcribe it, send it to the LLM if you used a trigger word, and respond with a spoken answer using TTS.
+- `>join free`: Similar to `>join`, but will respond to everything without using trigger words. Best for solo usage.
 
 ## Features
 - **Real-time Voice Recognition**: Transcribes user speech in real-time.
