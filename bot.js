@@ -1,19 +1,32 @@
 require('dotenv').config();
 
 const { Client, GatewayIntentBits, Intents } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, EndBehaviorType } = require('@discordjs/voice');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
+const ffmpeg = require('fluent-ffmpeg');
+const prism = require('prism-media');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const BOT_NAME = process.env.BOT_NAME.toLowerCase(); // Add your bot's trigger name in the .env file
+const botnames = process.env.BOT_TRIGGERS.split(',');
+if (!Array.isArray(botnames)) {
+  console.error('BOT_TRIGGERS must be an array of strings');
+  process.exit(1);
+}
+console.log('Bot Triggers:', botnames);
 const chatHistory = {};
-const audioPlayers = {};
+
+let allowwithouttrigger = false;
+
+// Create the recordings directory if it doesn't exist
+if (!fs.existsSync('./recordings')) {
+  fs.mkdirSync('./recordings');
+}
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
@@ -21,75 +34,141 @@ client.on('ready', () => {
 
 client.on('messageCreate', async message => {
   if (message.content === '>join') {
+    allowwithouttrigger = false;
     if (message.member.voice.channel) {
       const connection = joinVoiceChannel({
         channelId: message.member.voice.channel.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: false,
       });
-      console.log('Joined voice channel!');
-      listenToUserAudio(connection, message.member);
+      handleRecording(connection, message.member.voice.channel);
+    } else {
+      message.reply('You need to join a voice channel first!');
+    }
+  }
+  if (message.content === '>join free') {
+    allowwithouttrigger = true;
+    if (message.member.voice.channel) {
+      const connection = joinVoiceChannel({
+        channelId: message.member.voice.channel.id,
+        guildId: message.guild.id,
+        adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: false,
+      });
+      handleRecording(connection, message.member.voice.channel);
     } else {
       message.reply('You need to join a voice channel first!');
     }
   }
 });
 
-function listenToUserAudio(connection, member) {
+function handleRecording(connection, channel) {
   const receiver = connection.receiver;
-  connection.on('speaking', (user, speaking) => {
-    if (speaking) {
-      console.log(`I'm listening to ${user.username}`);
-      const audioStream = receiver.subscribe(user.id, {
-        end: {
-          behavior: EndBehaviorType.AfterSilence,
-          duration: 100,
-        },
-      });
+  channel.members.forEach(member => {
+    if (member.user.bot) return;
 
-      const audioFileName = `./recordings/${user.id}-${Date.now()}.pcm`;
-      const writeStream = fs.createWriteStream(audioFileName);
-      audioStream.pipe(writeStream);
+    const filePath = `./recordings/${member.user.id}_${Date.now()}.pcm`;
+    const writeStream = fs.createWriteStream(filePath);
+    const listenStream = receiver.subscribe(member.user.id, {
+      end: {
+        behavior: EndBehaviorType.AfterSilence,
+        duration: 2000,
+      },
+    });
 
-      writeStream.on('finish', () => {
-        console.log(`Audio recorded for ${user.username}`);
-        sendAudioToAPI(audioFileName, user.id, connection);
-      });
-    }
+    const opusDecoder = new prism.opus.Decoder({
+      frameSize: 960,
+      channels: 1,
+      rate: 48000,
+    });
+
+    listenStream.pipe(opusDecoder).pipe(writeStream);
+
+    writeStream.on('finish', () => {
+      console.log(`Audio recorded for ${member.user.username}`);
+      convertAndHandleFile(filePath, member.user.id, connection, channel);
+    });
   });
 }
 
-async function sendAudioToAPI(fileName, userId, connection) {
+function convertAndHandleFile(filePath, userid, connection, channel) {
+  const mp3Path = filePath.replace('.pcm', '.mp3');
+  ffmpeg(filePath)
+  .inputFormat('s16le')
+  .audioChannels(1)
+  .audioFrequency(48000)
+  .format('mp3')
+  .on('error', (err) => {
+    console.error(`Error converting file: ${err.message}`);
+  })
+  .save(mp3Path)
+  .on('end', () => {
+    console.log(`Converted to MP3: ${mp3Path}`);
+    sendAudioToAPI(mp3Path, userid, connection, channel);
+  });
+}
+
+async function sendAudioToAPI(fileName, userId, connection, channel) {
   const formData = new FormData();
   formData.append('model', process.env.STT_MODEL);
   formData.append('file', fs.createReadStream(fileName));
 
   try {
-      const response = await axios.post(process.env.STT_ENDPOINT + '/v1/audio/transcriptions', formData, {
-          headers: {
-              ...formData.getHeaders(),
-          },
-      });
-      const transcription = response.data.text;
-      console.log(`Transcription for ${userId}: "${transcription}"`);
+    const response = await axios.post(process.env.STT_ENDPOINT + '/v1/audio/transcriptions', formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+    });
+    const transcription = response.data.text;
+    console.log(`Transcription for ${userId}: "${transcription}"`);
 
-      // Check if the transcription includes the bot's name
-      if (transcription.toLowerCase().includes(BOT_NAME)) {
-          sendToLLM(transcription, userId, connection);
-      } else {
-          console.log("Bot was not addressed directly. Ignoring the command.");
-      }
+    // Check if the transcription includes the bot's name
+    if (botnames.some(name => {
+      const regex = new RegExp(`\\b${name}\\b`, 'i');
+      return regex.test(transcription) || allowwithouttrigger;
+    })) {
+        sendToLLM(transcription, userId, connection, channel);
+    } else {
+        console.log("Bot was not addressed directly. Ignoring the command.");
+        restartListening(connection, channel);
+    }
   } catch (error) {
-      console.error('Failed to transcribe audio:', error);
+    console.error('Failed to transcribe audio:', error);
+  } finally {
+    // Ensure files are always deleted regardless of the transcription result
+    try {
+      fs.unlinkSync(fileName);
+      const pcmPath = fileName.replace('.mp3', '.pcm');  // Ensure we have the correct .pcm path
+      fs.unlinkSync(pcmPath);
+    } catch (cleanupError) {
+      console.error('Error cleaning up files:', cleanupError.message);
+    }
   }
 }
 
-async function sendToLLM(transcription, userId, connection) {
-  const messages = chatHistory[userId] || [];
+async function sendToLLM(transcription, userId, connection, channel) {
+  let messages = chatHistory[userId] || [];
+
+  // If this is the first message, add a system prompt
+  if (messages.length === 0) {
+    messages.push({
+      role: 'system',
+      content: process.env.LLM_SYSTEM_PROMPT
+    });
+  }
+  
+  // Add the user's message to the chat history
   messages.push({
     role: 'user',
     content: transcription
   });
+
+  // Keep only the latest X messages
+  const messageCount = messages.length;
+  if (messageCount > process.env.MEMORY_SIZE) {
+    messages = messages.slice(messageCount - process.env.MEMORY_SIZE);
+  }
 
   try {
     const response = await axios.post(process.env.LLM_ENDPOINT+'/api/chat', {
@@ -106,16 +185,18 @@ async function sendToLLM(transcription, userId, connection) {
       role: 'assistant',
       content: message.content
     });
+    
+    // Update the chat history
     chatHistory[userId] = messages;
 
     // Send response to TTS service
-    sendToTTS(message.content, connection);
+    sendToTTS(message.content, connection, channel);
   } catch (error) {
     console.error('Failed to communicate with LLM:', error);
   }
 }
 
-async function sendToTTS(text, connection) {
+async function sendToTTS(text, connection, channel) {
   try {
     const response = await axios.post(process.env.TTS_ENDPOINT+'/v1/audio/speech', {
       model: process.env.TTS_MODEL,
@@ -128,19 +209,35 @@ async function sendToTTS(text, connection) {
     });
 
     const audioBuffer = Buffer.from(response.data);
-    const player = createAudioPlayer();
-    const resource = createAudioResource(audioBuffer, { inputType: StreamType.Arbitrary });
-    
-    if (!audioPlayers[connection.guildId]) {
-      audioPlayers[connection.guildId] = player;
-      connection.subscribe(player);
-    }
 
-    audioPlayers[connection.guildId].play(resource);
-    console.log('Playing response in voice channel.');
+    // save the audio buffer to a file
+    fs.writeFileSync('tts.mp3', audioBuffer);
+
+    // Create an audio player
+    const player = createAudioPlayer();
+
+    // Create an audio resource from a local file
+    const resource = createAudioResource('tts.mp3');
+
+    // Subscribe the connection to the player and play the resource
+    connection.subscribe(player);
+    player.play(resource);
+
+    // Handle clean up and restart listening
+    player.on(AudioPlayerStatus.Idle, () => {
+      console.log('Finished speaking, ready to listen again.');
+      restartListening(connection, channel);
+    });
+    player.on('error', error => console.error(`Error: ${error.message}`));
+
   } catch (error) {
     console.error('Failed to send text to TTS:', error);
   }
+}
+
+function restartListening(connection, channel) {
+  // Implement your listening logic here. This could be a call to handleRecording or similar.
+  handleRecording(connection, channel);
 }
 
 client.login(TOKEN);
