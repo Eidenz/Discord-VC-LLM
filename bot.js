@@ -19,16 +19,31 @@ if (!Array.isArray(botnames)) {
   process.exit(1);
 }
 console.log('Bot Triggers:', botnames);
-const chatHistory = {};
+let chatHistory = {};
 
 let allowwithouttrigger = false;
 
-// Create the recordings directory if it doesn't exist
+// Create the directories if they don't exist
 if (!fs.existsSync('./recordings')) {
   fs.mkdirSync('./recordings');
 }
+if (!fs.existsSync('./sounds')) {
+  fs.mkdirSync('./sounds');
+}
 
 client.on('ready', () => {
+  // Clean up any old recordings
+  fs.readdir('./recordings', (err, files) => {
+    if (err) {
+      console.error('Error reading recordings directory:', err);
+      return;
+    }
+
+    files.forEach(file => {
+      fs.unlinkSync(`./recordings/${file}`);
+    });
+  });
+
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
@@ -36,6 +51,9 @@ client.on('messageCreate', async message => {
   if (message.content === '>join') {
     allowwithouttrigger = false;
     if (message.member.voice.channel) {
+      // Delete user's message for spam
+      message.delete();
+
       const connection = joinVoiceChannel({
         channelId: message.member.voice.channel.id,
         guildId: message.guild.id,
@@ -50,6 +68,9 @@ client.on('messageCreate', async message => {
   if (message.content === '>join free') {
     allowwithouttrigger = true;
     if (message.member.voice.channel) {
+      // Delete user's message for spam
+      message.delete();
+
       const connection = joinVoiceChannel({
         channelId: message.member.voice.channel.id,
         guildId: message.guild.id,
@@ -60,6 +81,10 @@ client.on('messageCreate', async message => {
     } else {
       message.reply('You need to join a voice channel first!');
     }
+  }
+  if (message.content === '>reset') {
+    chatHistory = {};
+    message.reply('Chat history reset!');
   }
 });
 
@@ -123,11 +148,28 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     const transcription = response.data.text;
     console.log(`Transcription for ${userId}: "${transcription}"`);
 
+    // Check if transcription is a command
+    if (transcription.includes("reset") && transcription.includes("chat") && transcription.includes("history")) {
+      playSound(connection, 'command');
+      chatHistory = {};
+      console.log('Chat history reset!');
+      restartListening(connection, channel);
+      return;
+    }
+    else if (transcription.includes("leave") && transcription.includes("voice") && transcription.includes("chat")) {
+      playSound(connection, 'command');
+      connection.destroy();
+      chatHistory = {};
+      console.log('Left voice channel');
+      return;
+    }
+
     // Check if the transcription includes the bot's name
     if (botnames.some(name => {
       const regex = new RegExp(`\\b${name}\\b`, 'i');
       return regex.test(transcription) || allowwithouttrigger;
     })) {
+        playSound(connection, 'understood');
         sendToLLM(transcription, userId, connection, channel);
     } else {
         console.log("Bot was not addressed directly. Ignoring the command.");
@@ -190,6 +232,7 @@ async function sendToLLM(transcription, userId, connection, channel) {
     chatHistory[userId] = messages;
 
     // Send response to TTS service
+    playSound(connection, 'result');
     sendToTTS(message.content, connection, channel);
   } catch (error) {
     console.error('Failed to communicate with LLM:', error);
@@ -211,13 +254,13 @@ async function sendToTTS(text, connection, channel) {
     const audioBuffer = Buffer.from(response.data);
 
     // save the audio buffer to a file
-    fs.writeFileSync('tts.mp3', audioBuffer);
+    fs.writeFileSync('./sounds/tts.mp3', audioBuffer);
 
     // Create an audio player
     const player = createAudioPlayer();
 
     // Create an audio resource from a local file
-    const resource = createAudioResource('tts.mp3');
+    const resource = createAudioResource('./sounds/tts.mp3');
 
     // Subscribe the connection to the player and play the resource
     connection.subscribe(player);
@@ -233,6 +276,26 @@ async function sendToTTS(text, connection, channel) {
   } catch (error) {
     console.error('Failed to send text to TTS:', error);
   }
+}
+
+async function playSound(connection, sound) {
+  // Check if the sound file exists
+  if (!fs.existsSync(`./sounds/${sound}.mp3`)) {
+    console.error(`Sound file not found: ${sound}.mp3`);
+    return;
+  }
+
+  // Create an audio player
+  const player = createAudioPlayer();
+
+  // Create an audio resource from a local file
+  const resource = createAudioResource('./sounds/'+sound+'.mp3');
+
+  // Subscribe the connection to the player and play the resource
+  connection.subscribe(player);
+  player.play(resource);
+
+  player.on('error', error => console.error(`Error: ${error.message}`));
 }
 
 function restartListening(connection, channel) {
