@@ -34,7 +34,8 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 2. **Invite the Bot to Your Discord Server:**
 - Use the invite link generated through your Discord application page. Here is a quick link with all the permissions the bot should ever need:
 https://discord.com/oauth2/authorize?client_id=REPLACEME&permissions=964220516416&scope=bot
-Change "REPLACEME" with your bot's ID.
+
+(Change "REPLACEME" with your bot's ID)
 
 3. **Using the Bot in Discord:**
 - Ensure the bot has permission to join voice channels and speak.
