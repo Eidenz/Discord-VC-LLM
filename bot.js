@@ -22,6 +22,7 @@ console.log('Bot Triggers:', botnames);
 let chatHistory = {};
 
 let allowwithouttrigger = false;
+let currentlythinking = false;
 
 // Create the directories if they don't exist
 if (!fs.existsSync('./recordings')) {
@@ -84,7 +85,7 @@ client.on('messageCreate', async message => {
   }
   if (message.content === '>reset') {
     chatHistory = {};
-    message.reply('Chat history reset!');
+    message.reply('> Chat history reset!');
   }
 });
 
@@ -111,7 +112,7 @@ function handleRecording(connection, channel) {
     listenStream.pipe(opusDecoder).pipe(writeStream);
 
     writeStream.on('finish', () => {
-      console.log(`Audio recorded for ${member.user.username}`);
+      console.log(`> Audio recorded for ${member.user.username}`);
       convertAndHandleFile(filePath, member.user.id, connection, channel);
     });
   });
@@ -138,7 +139,7 @@ function handleRecordingForUser(userID, connection, channel) {
   listenStream.pipe(opusDecoder).pipe(writeStream);
 
   writeStream.on('finish', () => {
-    console.log(`Audio recorded for ${userID}`);
+    console.log(`> Audio recorded for ${userID}`);
     convertAndHandleFile(filePath, userID, connection, channel);
   });
 }
@@ -151,11 +152,12 @@ function convertAndHandleFile(filePath, userid, connection, channel) {
   .audioFrequency(48000)
   .format('mp3')
   .on('error', (err) => {
-    console.error(`Error converting file: ${err.message}`);
+    console.error(`X Error converting file: ${err.message}`);
+    currentlythinking = false;
   })
   .save(mp3Path)
   .on('end', () => {
-    console.log(`Converted to MP3: ${mp3Path}`);
+    console.log(`> Converted to MP3: ${mp3Path}`);
     sendAudioToAPI(mp3Path, userid, connection, channel);
   });
 }
@@ -171,22 +173,39 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         ...formData.getHeaders(),
       },
     });
-    const transcription = response.data.text;
-    console.log(`Transcription for ${userId}: "${transcription}"`);
+    let transcription = response.data.text;
+    console.log(`> Transcription for ${userId}: "${transcription}"`);
+
+    if(currentlythinking){
+      if (transcription.includes("stop")) {
+        playSound(connection, 'command');
+        currentlythinking = false;
+        audioqueue = [];
+        console.log('> Bot stopped thinking.');
+        restartListening(userId, connection, channel);
+        return;
+      }
+
+      console.log('> Bot is already thinking, ignoring transcription.');
+      restartListening(userId, connection, channel);
+      return;
+    }
 
     // Check if transcription is a command
     if (transcription.includes("reset") && transcription.includes("chat") && transcription.includes("history")) {
       playSound(connection, 'command');
+      currentlythinking = false;
       chatHistory = {};
-      console.log('Chat history reset!');
+      console.log('> Chat history reset!');
       restartListening(userId, connection, channel);
       return;
     }
     else if (transcription.includes("leave") && transcription.includes("voice") && transcription.includes("chat")) {
       playSound(connection, 'command');
+      currentlythinking = false;
       connection.destroy();
       chatHistory = {};
-      console.log('Left voice channel');
+      console.log('> Left voice channel');
       return;
     }
 
@@ -195,14 +214,28 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const regex = new RegExp(`\\b${name}\\b`, 'i');
       return regex.test(transcription) || allowwithouttrigger;
     })) {
+        // Ignore if the string is a single word
+        if (transcription.split(' ').length <= 1) {
+          currentlythinking = false;
+          console.log('> Ignoring single word command.');
+          restartListening(userId, connection, channel);
+          return;
+        }
+
+        // Remove the first occurrence of the bot's name from the transcription
+        transcription = transcription.replace(new RegExp(`\\b${botnames[0]}\\b`, 'i'), '').trim();
+        currentlythinking = true;
         playSound(connection, 'understood');
         sendToLLM(transcription, userId, connection, channel);
+        restartListening(userId, connection, channel);
     } else {
-        console.log("Bot was not addressed directly. Ignoring the command.");
+        currentlythinking = false;
+        console.log("> Bot was not addressed directly. Ignoring the command.");
         restartListening(userId, connection, channel);
     }
   } catch (error) {
-    console.error('Failed to transcribe audio:', error);
+    currentlythinking = false;
+    console.error('X Failed to transcribe audio:', error);
     // Restart listening after an error
     restartListening(userId, connection, channel);
   } finally {
@@ -212,7 +245,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const pcmPath = fileName.replace('.mp3', '.pcm');  // Ensure we have the correct .pcm path
       fs.unlinkSync(pcmPath);
     } catch (cleanupError) {
-      console.error('Error cleaning up files:', cleanupError.message);
+      console.error('X Error cleaning up files:', cleanupError.message);
     }
   }
 }
@@ -222,10 +255,18 @@ async function sendToLLM(transcription, userId, connection, channel) {
 
   // If this is the first message, add a system prompt
   if (messages.length === 0) {
-    messages.push({
-      role: 'system',
-      content: process.env.LLM_SYSTEM_PROMPT
-    });
+    if(allowwithouttrigger){
+      messages.push({
+        role: 'system',
+        content: process.env.LLM_SYSTEM_PROMPT_FREE
+      });
+    }
+    else{
+      messages.push({
+        role: 'system',
+        content: process.env.LLM_SYSTEM_PROMPT
+      });
+    }
   }
   
   // Add the user's message to the chat history
@@ -248,7 +289,13 @@ async function sendToLLM(transcription, userId, connection, channel) {
     });
 
     const { message } = response.data;
-    console.log('LLM Response:', message.content);
+    console.log('> LLM Response:', message.content);
+
+    if(message.content.includes("IGNORING")){
+      currentlythinking = false;
+      console.log('> LLM Ignored the command.');
+      return;
+    }
 
     // Store the LLM's response in the history
     messages.push({
@@ -263,8 +310,8 @@ async function sendToLLM(transcription, userId, connection, channel) {
     playSound(connection, 'result');
     sendToTTS(message.content, userId, connection, channel);
   } catch (error) {
-    console.error('Failed to communicate with LLM:', error);
-    restartListening(userId, connection, channel);
+    currentlythinking = false;
+    console.error('X Failed to communicate with LLM:', error);
   }
 }
 
@@ -272,72 +319,231 @@ let audioqueue = [];
 
 async function sendToTTS(text, userid, connection, channel) {
   const words = text.split(' ');
-  const chunkSize = 60;
+  const maxChunkSize = 60; // Maximum words per chunk
+  const punctuationMarks = ['.', '!', '?', ';', ':']; // Punctuation marks to look for
   const chunks = [];
 
-  for (let i = 0; i < words.length; i += chunkSize) {
-    chunks.push(words.slice(i, i + chunkSize).join(' '));
+  for (let i = 0; i < words.length;) {
+    let end = Math.min(i + maxChunkSize, words.length); // Find the initial end of the chunk
+
+    // If the initial end is not the end of the text, try to find a closer punctuation mark
+    if (end < words.length) {
+      let lastPunctIndex = -1;
+      for (let j = i; j < end; j++) {
+        if (punctuationMarks.includes(words[j].slice(-1))) {
+          lastPunctIndex = j;
+        }
+      }
+      // If a punctuation mark was found, adjust the end to be after it
+      if (lastPunctIndex !== -1) {
+        end = lastPunctIndex + 1;
+      }
+    }
+
+    // Create the chunk from i to the new end, then adjust i to start the next chunk
+    chunks.push(words.slice(i, end).join(' '));
+    i = end;
   }
 
   for (const chunk of chunks) {
     try {
-      const response = await axios.post(process.env.TTS_ENDPOINT + '/v1/audio/speech', {
-        model: process.env.TTS_MODEL,
-        input: chunk,
-        voice: process.env.TTS_VOICE,
-        response_format: "mp3",
-        speed: 1.0
-      }, {
-        responseType: 'arraybuffer'
-      });
+      if(process.env.TTS_TYPE === "speecht5"){
+        console.log('> Using SpeechT5 TTS');
+        const response = await axios.post(process.env.TTS_ENDPOINT + '/synthesize', {
+          text: chunk,
+        }, {
+          responseType: 'arraybuffer'
+        });
 
-      const audioBuffer = Buffer.from(response.data);
+        const audioBuffer = Buffer.from(response.data);
 
-      // save the audio buffer to a file
-      const filename = `./sounds/tts_${chunks.indexOf(chunk)}.mp3`;
-      fs.writeFileSync(filename, audioBuffer);
+        // save the audio buffer to a file
+        const filename = `./sounds/tts_${chunks.indexOf(chunk)}.wav`;
+        fs.writeFileSync(filename, audioBuffer);
 
-      audioqueue.push({ file: filename });
+        if(process.env.RVC === "true"){
+          sendToRVC(filename, userid, connection, channel);
+        }
+        else{
+          audioqueue.push({ file: filename, index: chunks.indexOf(chunk) });
 
-      if (audioqueue.length === 1) {
-        playAudioQueue(connection, channel, userid);
+          if (audioqueue.length === 1) {
+            playAudioQueue(connection, channel, userid);
+          }
+        }
+      }
+      else{
+        console.log('> Using OpenAI TTS');
+
+        const response = await axios.post(process.env.OPENAI_TTS_ENDPOINT + '/v1/audio/speech', {
+          model: process.env.TTS_MODEL,
+          input: chunk,
+          voice: process.env.TTS_VOICE,
+          response_format: "mp3",
+          speed: 1.0
+        }, {
+          responseType: 'arraybuffer'
+        });
+
+        const audioBuffer = Buffer.from(response.data);
+
+        // save the audio buffer to a file
+        const filename = `./sounds/tts_${chunks.indexOf(chunk)}.mp3`;
+        fs.writeFileSync(filename, audioBuffer);
+
+        if(process.env.RVC === "true"){
+          sendToRVC(filename, userid, connection, channel);
+        }
+        else{
+          audioqueue.push({ file: filename, index: chunks.indexOf(chunk) });
+
+          if (audioqueue.length === 1) {
+            console.log('> Playing audio queue');
+            playAudioQueue(connection, channel, userid);
+          }
+        }
       }
     } catch (error) {
+      currentlythinking = false;
       console.error('Failed to send text to TTS:', error);
     }
   }
 }
 
-async function playAudioQueue(connection, channel, userid) {
-  for (const audio of audioqueue) {
-    // Create an audio player
-    const player = createAudioPlayer();
+async function sendToRVC(file, userid, connection, channel) {
+  try {
+    console.log('> Sending TTS to RVC');
 
-    // Create an audio resource from a local file
-    const resource = createAudioResource(audio.file);
+    let mp3name = file.replace('tts', 'rvc');
+    mp3name = mp3name.replace('mp3', 'wav');
+    let mp3index = mp3name.split('_')[1].split('.')[0];
+    mp3index = parseInt(mp3index);
 
-    // Subscribe the connection to the player and play the resource
-    connection.subscribe(player);
-    player.play(resource);
+    // Create an instance of FormData
+    const formData = new FormData();
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      // Delete the file after it's played
-      fs.unlinkSync(audio.file);
-
-      audioqueue.shift();
-      if (audioqueue.length > 0) {
-        playAudioQueue(connection, channel);
-      } else {
-        console.log('Audio queue finished, restarting listening.');
-        restartListening(userid, connection, channel);
-      }
+    // Append the file to the form data. Here 'input_file' is the key name used in the form
+    formData.append('input_file', fs.createReadStream(file), {
+      filename: file,
+      contentType: 'audio/mpeg'
     });
 
-    player.on('error', error => console.error(`Error: ${error.message}`));
+    // Configure the Axios request
+    const config = {
+      method: 'post',
+      url: process.env.RVC_ENDPOINT+'/voice2voice?model_name='+process.env.RVC_MODEL+'&index_path='+process.env.RVC_MODEL+'&f0up_key='+process.env.RVC_F0+'&f0method=rmvpe&index_rate='+process.env.RVC_INDEX_RATE+'&is_half=false&filter_radius=3&resample_sr=0&rms_mix_rate=1&protect='+process.env.RVC_PROTECT,
+      headers: { 
+        ...formData.getHeaders(), // Spread the headers from formData to ensure correct boundary is set
+        'accept': 'application/json'
+      },
+      responseType: 'stream', // This ensures that Axios handles the response as a stream
+      data: formData
+    };
+
+    // Send the request using Axios
+    axios(config)
+    .then(function (response) {
+      // Handle the stream response to save it as a file
+      const writer = fs.createWriteStream(mp3name);
+      response.data.pipe(writer);
+
+      return new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+    })
+    .then(() => {
+      // Delete original tts file
+      fs.unlinkSync(file);
+
+      audioqueue.push({ file: mp3name, index: mp3index });
+
+      if (audioqueue.length === 1) {
+        console.log('> Playing audio queue');
+        playAudioQueue(connection, channel, userid);
+      }
+    })
+    .catch(function (error) {
+      console.error(error);
+    });
+  } catch (error) {
+    currentlythinking = false;
+    console.error('Failed to send tts to RVC:', error);
+  }
+}
+
+let currentIndex = 0;
+let retryCount = 0;
+const maxRetries = 5; // Maximum number of retries before giving up
+
+async function playAudioQueue(connection, channel, userid) {
+  console.log(audioqueue);
+  // Sort the audioqueue based on the index to ensure the correct play order
+  audioqueue.sort((a, b) => a.index - b.index);
+
+  while (audioqueue.length > 0) {
+    const audio = audioqueue.find(a => a.index === currentIndex);
+    if (audio) {
+      // Create an audio player
+      const player = createAudioPlayer();
+      
+      // Create an audio resource from a local file
+      const resource = createAudioResource(audio.file);
+      
+      // Subscribe the connection to the player and play the resource
+      connection.subscribe(player);
+      player.play(resource);
+
+      player.on('idle', async () => {
+        // Delete the file after it's played
+        try {
+          fs.unlinkSync(audio.file);
+        } catch (err) {
+          console.warn('Failed to delete file.');
+        }
+
+        // Remove the played audio from the queue
+        audioqueue = audioqueue.filter(a => a.index !== currentIndex);
+        currentIndex++;
+        retryCount = 0; // Reset retry count for the next index
+
+        if (audioqueue.length > 0) {
+          await playAudioQueue(connection, channel, userid); // Continue playing
+        } else {
+          currentlythinking = false;
+          audioqueue = [];
+          currentIndex = 0;
+          retryCount = 0;
+          console.log('Audio queue finished.');
+        }
+      });
+
+      player.on('error', error => console.error(`Error: ${error.message}`));
+
+      break; // Exit the while loop after setting up the player for the current index
+    } else {
+      // If the expected index is not found, wait 1 second and increase the retry count
+      if (retryCount < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        retryCount++;
+      } else {
+        currentlythinking = false;
+        audioqueue = [];
+        currentIndex = 0;
+        retryCount = 0;
+        console.log(`Failed to find audio with index ${currentIndex} after ${maxRetries} retries.`);
+        break; // Give up after exceeding retry limit
+      }
+    }
   }
 }
 
 async function playSound(connection, sound) {
+  // Check if allowwithouttrigger is true, if yes ignore
+  if (allowwithouttrigger && sound !== 'command') {
+    return;
+  }
+
   // Check if the sound file exists
   if (!fs.existsSync(`./sounds/${sound}.mp3`)) {
     console.error(`Sound file not found: ${sound}.mp3`);
