@@ -93,7 +93,7 @@ function handleRecording(connection, channel) {
   channel.members.forEach(member => {
     if (member.user.bot) return;
 
-    const filePath = `./recordings/${member.user.id}_${Date.now()}.pcm`;
+    const filePath = `./recordings/${member.user.id}.pcm`;
     const writeStream = fs.createWriteStream(filePath);
     const listenStream = receiver.subscribe(member.user.id, {
       end: {
@@ -114,6 +114,32 @@ function handleRecording(connection, channel) {
       console.log(`Audio recorded for ${member.user.username}`);
       convertAndHandleFile(filePath, member.user.id, connection, channel);
     });
+  });
+}
+
+function handleRecordingForUser(userID, connection, channel) {
+  const receiver = connection.receiver;
+
+  const filePath = `./recordings/${userID}.pcm`;
+  const writeStream = fs.createWriteStream(filePath);
+  const listenStream = receiver.subscribe(userID, {
+    end: {
+      behavior: EndBehaviorType.AfterSilence,
+      duration: 2000,
+    },
+  });
+
+  const opusDecoder = new prism.opus.Decoder({
+    frameSize: 960,
+    channels: 1,
+    rate: 48000,
+  });
+
+  listenStream.pipe(opusDecoder).pipe(writeStream);
+
+  writeStream.on('finish', () => {
+    console.log(`Audio recorded for ${userID}`);
+    convertAndHandleFile(filePath, userID, connection, channel);
   });
 }
 
@@ -153,7 +179,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       playSound(connection, 'command');
       chatHistory = {};
       console.log('Chat history reset!');
-      restartListening(connection, channel);
+      restartListening(userId, connection, channel);
       return;
     }
     else if (transcription.includes("leave") && transcription.includes("voice") && transcription.includes("chat")) {
@@ -173,10 +199,12 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         sendToLLM(transcription, userId, connection, channel);
     } else {
         console.log("Bot was not addressed directly. Ignoring the command.");
-        restartListening(connection, channel);
+        restartListening(userId, connection, channel);
     }
   } catch (error) {
     console.error('Failed to transcribe audio:', error);
+    // Restart listening after an error
+    restartListening(userId, connection, channel);
   } finally {
     // Ensure files are always deleted regardless of the transcription result
     try {
@@ -233,48 +261,79 @@ async function sendToLLM(transcription, userId, connection, channel) {
 
     // Send response to TTS service
     playSound(connection, 'result');
-    sendToTTS(message.content, connection, channel);
+    sendToTTS(message.content, userId, connection, channel);
   } catch (error) {
     console.error('Failed to communicate with LLM:', error);
+    restartListening(userId, connection, channel);
   }
 }
 
-async function sendToTTS(text, connection, channel) {
-  try {
-    const response = await axios.post(process.env.TTS_ENDPOINT+'/v1/audio/speech', {
-      model: process.env.TTS_MODEL,
-      input: text,
-      voice: process.env.TTS_VOICE,
-      response_format: "mp3",
-      speed: 1.0
-    }, {
-      responseType: 'arraybuffer'
-    });
+let audioqueue = [];
 
-    const audioBuffer = Buffer.from(response.data);
+async function sendToTTS(text, userid, connection, channel) {
+  const words = text.split(' ');
+  const chunkSize = 60;
+  const chunks = [];
 
-    // save the audio buffer to a file
-    fs.writeFileSync('./sounds/tts.mp3', audioBuffer);
+  for (let i = 0; i < words.length; i += chunkSize) {
+    chunks.push(words.slice(i, i + chunkSize).join(' '));
+  }
 
+  for (const chunk of chunks) {
+    try {
+      const response = await axios.post(process.env.TTS_ENDPOINT + '/v1/audio/speech', {
+        model: process.env.TTS_MODEL,
+        input: chunk,
+        voice: process.env.TTS_VOICE,
+        response_format: "mp3",
+        speed: 1.0
+      }, {
+        responseType: 'arraybuffer'
+      });
+
+      const audioBuffer = Buffer.from(response.data);
+
+      // save the audio buffer to a file
+      const filename = `./sounds/tts_${chunks.indexOf(chunk)}.mp3`;
+      fs.writeFileSync(filename, audioBuffer);
+
+      audioqueue.push({ file: filename });
+
+      if (audioqueue.length === 1) {
+        playAudioQueue(connection, channel, userid);
+      }
+    } catch (error) {
+      console.error('Failed to send text to TTS:', error);
+    }
+  }
+}
+
+async function playAudioQueue(connection, channel, userid) {
+  for (const audio of audioqueue) {
     // Create an audio player
     const player = createAudioPlayer();
 
     // Create an audio resource from a local file
-    const resource = createAudioResource('./sounds/tts.mp3');
+    const resource = createAudioResource(audio.file);
 
     // Subscribe the connection to the player and play the resource
     connection.subscribe(player);
     player.play(resource);
 
-    // Handle clean up and restart listening
     player.on(AudioPlayerStatus.Idle, () => {
-      console.log('Finished speaking, ready to listen again.');
-      restartListening(connection, channel);
-    });
-    player.on('error', error => console.error(`Error: ${error.message}`));
+      // Delete the file after it's played
+      fs.unlinkSync(audio.file);
 
-  } catch (error) {
-    console.error('Failed to send text to TTS:', error);
+      audioqueue.shift();
+      if (audioqueue.length > 0) {
+        playAudioQueue(connection, channel);
+      } else {
+        console.log('Audio queue finished, restarting listening.');
+        restartListening(userid, connection, channel);
+      }
+    });
+
+    player.on('error', error => console.error(`Error: ${error.message}`));
   }
 }
 
@@ -298,9 +357,8 @@ async function playSound(connection, sound) {
   player.on('error', error => console.error(`Error: ${error.message}`));
 }
 
-function restartListening(connection, channel) {
-  // Implement your listening logic here. This could be a call to handleRecording or similar.
-  handleRecording(connection, channel);
+function restartListening(userID, connection, channel) {
+  handleRecordingForUser(userID, connection, channel);
 }
 
 client.login(TOKEN);
