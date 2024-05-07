@@ -695,6 +695,10 @@ function logToConsole(message, level, type) {
 }
 
 async function searchYouTube(query) {
+  if(process.env.YOUTUBE_API === undefined || process.env.YOUTUBE_API === ""){
+    logToConsole('X YouTube API key is missing', 'error', 1);
+    return null;
+  }
   const res = await youtube.search.list({
       part: 'snippet',
       q: query,

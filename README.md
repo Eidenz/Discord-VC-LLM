@@ -45,6 +45,10 @@ https://discord.com/oauth2/authorize?client_id=REPLACEME&permissions=96422051641
 ## Commands
 - `>join`: Command for the bot to join the voice channel you are currently in. The bot will listen to voice input, transcribe it, send it to the LLM if you used a trigger word, and respond with a spoken answer using TTS.
 - `>join free`: Similar to `>join`, but will respond to everything without using trigger words. Best for solo usage.
+- `>join silent`: Similar to `>join`, but no confirmation sound will play when trigger is detected/llm responded.
+- `>play [song name or URL]`: Play a song from YouTube using either its name (search via API) or direct URL. Please note that the search function requires a valid API key.
+- `>reset`: Reset the LLM chat history.
+- `>help`: Display the list of available commands.
 
 ## Features
 - **Real-time Voice Recognition**: Transcribes user speech in real-time.
