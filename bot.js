@@ -282,33 +282,46 @@ async function sendToLLM(transcription, userId, connection, channel) {
   }
 
   try {
-    const response = await axios.post(process.env.LLM_ENDPOINT+'/api/chat', {
-      model: process.env.LLM,
-      messages: messages,
-      stream: false
-    });
-
-    const { message } = response.data;
-    console.log('> LLM Response:', message.content);
-
-    if(message.content.includes("IGNORING")){
-      currentlythinking = false;
-      console.log('> LLM Ignored the command.');
-      return;
-    }
-
-    // Store the LLM's response in the history
-    messages.push({
-      role: 'assistant',
-      content: message.content
+    const client = axios.create({
+      baseURL: process.env.LLM_ENDPOINT,
+      headers: {
+        'Authorization': `Bearer ${process.env.LLM_API}`,
+        'Content-Type': 'application/json'
+      }
     });
     
-    // Update the chat history
-    chatHistory[userId] = messages;
+    // Chat completion without streaming
+    client.post('/chat/completions', {
+      model: process.env.LLM,
+      messages: messages,
+    })
+    .then((response) => {
+      const { message } = response.data;
+      console.log('> LLM Response:', message.content);
 
-    // Send response to TTS service
-    playSound(connection, 'result');
-    sendToTTS(message.content, userId, connection, channel);
+      if(message.content.includes("IGNORING")){
+        currentlythinking = false;
+        console.log('> LLM Ignored the command.');
+        return;
+      }
+
+      // Store the LLM's response in the history
+      messages.push({
+        role: 'assistant',
+        content: message.content
+      });
+      
+      // Update the chat history
+      chatHistory[userId] = messages;
+
+      // Send response to TTS service
+      playSound(connection, 'result');
+      sendToTTS(message.content, userId, connection, channel);
+    })
+    .catch((error) => {
+      currentlythinking = false;
+      console.error('X Failed to communicate with LLM:', error);
+    });
   } catch (error) {
     currentlythinking = false;
     console.error('X Failed to communicate with LLM:', error);
