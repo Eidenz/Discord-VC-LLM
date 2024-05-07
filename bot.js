@@ -7,9 +7,18 @@ const axios = require('axios');
 const FormData = require('form-data');
 const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
+const ytdl = require('ytdl-core');
+const { google } = require('googleapis');
+const { log } = require('console');
+const { send } = require('process');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+});
+
+const youtube = google.youtube({
+  version: 'v3',
+  auth: process.env.YOUTUBE_API
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -177,7 +186,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     if(currentlythinking){
-      if (transcription.includes("stop")) {
+      if (transcription.toLowerCase().includes("stop")) {
         playSound(connection, 'command');
         currentlythinking = false;
         audioqueue = [];
@@ -192,7 +201,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     }
 
     // Check if transcription is a command
-    if (transcription.includes("reset") && transcription.includes("chat") && transcription.includes("history")) {
+    if (transcription.toLowerCase().includes("reset") && transcription.toLowerCase().includes("chat") && transcription.toLowerCase().includes("history")) {
       playSound(connection, 'command');
       currentlythinking = false;
       chatHistory = {};
@@ -200,7 +209,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       restartListening(userId, connection, channel);
       return;
     }
-    else if (transcription.includes("leave") && transcription.includes("voice") && transcription.includes("chat")) {
+    else if (transcription.toLowerCase().includes("leave") && transcription.toLowerCase().includes("voice") && transcription.toLowerCase().includes("chat")) {
       playSound(connection, 'command');
       currentlythinking = false;
       connection.destroy();
@@ -223,7 +232,26 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         }
 
         // Remove the first occurrence of the bot's name from the transcription
-        transcription = transcription.replace(new RegExp(`\\b${botnames[0]}\\b`, 'i'), '').trim();
+        for (const name of botnames) {
+          transcription = transcription.replace(new RegExp(`\\b${name}\\b`, 'i'), '').trim();
+        }
+
+        // CHeck if transcription is requesting a song
+        const songTriggers = [['play', 'song'], ['play', 'youtube']];
+        if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+          currentlythinking = true;
+          playSound(connection, 'understood');
+          // Remove the song triggers from the transcription
+          for (const trigger of songTriggers) {
+            for (const word of trigger) {
+              transcription = transcription.replace(word, '').trim();
+            }
+          }
+          seatchAndPlayYouTube(songName, userId, connection, channel);
+          restartListening(userId, connection, channel);
+          return;
+        }
+
         currentlythinking = true;
         playSound(connection, 'understood');
         sendToLLM(transcription, userId, connection, channel);
@@ -579,6 +607,36 @@ function restartListening(userID, connection, channel) {
   handleRecordingForUser(userID, connection, channel);
 }
 
+async function seatchAndPlayYouTube(songName, userid, connection, channel) {
+  const videoUrl = await searchYouTube(songName);
+  if (!videoUrl) {
+      // If no video was found, voice it out
+      sendToTTS('Sorry, I could not find the requested song.', userid, connection, channel);
+  }
+
+  logToConsole(`> Playing YouTube video: ${videoUrl}`, 'info', 1);
+
+  const stream = ytdl(videoUrl, { filter: 'audioonly', quality: 'highestaudio' });
+  const ffmpegStream = ffmpeg(stream)
+      .audioFilters(`volume=0.05`)
+      .format('opus')
+      .on('error', (err) => console.error(err))
+      .stream();
+
+  const resource = createAudioResource(ffmpegStream);
+  const player = createAudioPlayer();
+
+  player.play(resource);
+  connection.subscribe(player);
+
+  player.on('stateChange', (oldState, newState) => {
+      if (newState.status === 'idle') {
+        currentlythinking = false;
+        logToConsole('> Finished playing YouTube.', 'info', 1);
+      }
+  });
+}
+
 function logToConsole(message, level, type) {
   switch (level) {
     case 'info':
@@ -595,6 +653,18 @@ function logToConsole(message, level, type) {
       console.error(message);
       break;
   }
+}
+
+async function searchYouTube(query) {
+  const res = await youtube.search.list({
+      part: 'snippet',
+      q: query,
+      maxResults: 1,
+      type: 'video'
+  });
+  const videos = res.data.items;
+  if (!videos.length) return null;
+  return `https://www.youtube.com/watch?v=${videos[0].id.videoId}`;
 }
 
 client.login(TOKEN);
