@@ -15,10 +15,10 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 const botnames = process.env.BOT_TRIGGERS.split(',');
 if (!Array.isArray(botnames)) {
-  console.error('BOT_TRIGGERS must be an array of strings');
+  logToConsole('BOT_TRIGGERS must be an array of strings', 'error', 1);
   process.exit(1);
 }
-console.log('Bot Triggers:', botnames);
+logToConsole('Bot Triggers: ' + botnames, 'info', 1);
 let chatHistory = {};
 
 let allowwithouttrigger = false;
@@ -36,7 +36,7 @@ client.on('ready', () => {
   // Clean up any old recordings
   fs.readdir('./recordings', (err, files) => {
     if (err) {
-      console.error('Error reading recordings directory:', err);
+      logToConsole('Error reading recordings directory', 'error', 1);
       return;
     }
 
@@ -45,7 +45,7 @@ client.on('ready', () => {
     });
   });
 
-  console.log(`Logged in as ${client.user.tag}!`);
+  logToConsole(`Logged in as ${client.user.tag}!`, 'info', 1);
 });
 
 client.on('messageCreate', async message => {
@@ -112,7 +112,7 @@ function handleRecording(connection, channel) {
     listenStream.pipe(opusDecoder).pipe(writeStream);
 
     writeStream.on('finish', () => {
-      console.log(`> Audio recorded for ${member.user.username}`);
+      logToConsole(`> Audio recorded for ${member.user.username}`, 'info', 2);
       convertAndHandleFile(filePath, member.user.id, connection, channel);
     });
   });
@@ -139,7 +139,7 @@ function handleRecordingForUser(userID, connection, channel) {
   listenStream.pipe(opusDecoder).pipe(writeStream);
 
   writeStream.on('finish', () => {
-    console.log(`> Audio recorded for ${userID}`);
+    logToConsole(`> Audio recorded for ${userID}`, 'info', 2);
     convertAndHandleFile(filePath, userID, connection, channel);
   });
 }
@@ -152,12 +152,12 @@ function convertAndHandleFile(filePath, userid, connection, channel) {
   .audioFrequency(48000)
   .format('mp3')
   .on('error', (err) => {
-    console.error(`X Error converting file: ${err.message}`);
+    logToConsole(`X Error converting file: ${err.message}`, 'error', 1);
     currentlythinking = false;
   })
   .save(mp3Path)
   .on('end', () => {
-    console.log(`> Converted to MP3: ${mp3Path}`);
+    logToConsole(`> Converted to MP3: ${mp3Path}`, 'info', 2);
     sendAudioToAPI(mp3Path, userid, connection, channel);
   });
 }
@@ -174,19 +174,19 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       },
     });
     let transcription = response.data.text;
-    console.log(`> Transcription for ${userId}: "${transcription}"`);
+    logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     if(currentlythinking){
       if (transcription.includes("stop")) {
         playSound(connection, 'command');
         currentlythinking = false;
         audioqueue = [];
-        console.log('> Bot stopped thinking.');
+        logToConsole('> Bot stopped thinking.', 'info', 1);
         restartListening(userId, connection, channel);
         return;
       }
 
-      console.log('> Bot is already thinking, ignoring transcription.');
+      logToConsole('> Bot is already thinking, ignoring transcription.', 'info', 2);
       restartListening(userId, connection, channel);
       return;
     }
@@ -196,7 +196,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       playSound(connection, 'command');
       currentlythinking = false;
       chatHistory = {};
-      console.log('> Chat history reset!');
+      logToConsole('> Chat history reset!', 'info', 1);
       restartListening(userId, connection, channel);
       return;
     }
@@ -205,7 +205,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       currentlythinking = false;
       connection.destroy();
       chatHistory = {};
-      console.log('> Left voice channel');
+      logToConsole('> Left voice channel', 'info', 1);
       return;
     }
 
@@ -217,7 +217,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         // Ignore if the string is a single word
         if (transcription.split(' ').length <= 1) {
           currentlythinking = false;
-          console.log('> Ignoring single word command.');
+          logToConsole('> Ignoring single word command.', 'info', 2);
           restartListening(userId, connection, channel);
           return;
         }
@@ -230,12 +230,12 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         restartListening(userId, connection, channel);
     } else {
         currentlythinking = false;
-        console.log("> Bot was not addressed directly. Ignoring the command.");
+        logToConsole('> Bot was not addressed directly. Ignoring the command.', 'info', 2);
         restartListening(userId, connection, channel);
     }
   } catch (error) {
     currentlythinking = false;
-    console.error('X Failed to transcribe audio:', error);
+    logToConsole(`X Failed to transcribe audio: ${error.message}`, 'error', 1);
     // Restart listening after an error
     restartListening(userId, connection, channel);
   } finally {
@@ -245,7 +245,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const pcmPath = fileName.replace('.mp3', '.pcm');  // Ensure we have the correct .pcm path
       fs.unlinkSync(pcmPath);
     } catch (cleanupError) {
-      console.error('X Error cleaning up files:', cleanupError.message);
+      logToConsole(`X Error cleaning up files: ${cleanupError.message}`, 'error', 1);
     }
   }
 }
@@ -297,11 +297,11 @@ async function sendToLLM(transcription, userId, connection, channel) {
     })
     .then((response) => {
       const { message } = response.data;
-      console.log('> LLM Response:', message.content);
+      logToConsole(`> LLM Response: ${message.content}`, 'info', 1);
 
       if(message.content.includes("IGNORING")){
         currentlythinking = false;
-        console.log('> LLM Ignored the command.');
+        logToConsole('> LLM Ignored the command.', 'info', 2);
         return;
       }
 
@@ -320,11 +320,11 @@ async function sendToLLM(transcription, userId, connection, channel) {
     })
     .catch((error) => {
       currentlythinking = false;
-      console.error('X Failed to communicate with LLM:', error);
+      logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
     });
   } catch (error) {
     currentlythinking = false;
-    console.error('X Failed to communicate with LLM:', error);
+    logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
   }
 }
 
@@ -361,7 +361,7 @@ async function sendToTTS(text, userid, connection, channel) {
   for (const chunk of chunks) {
     try {
       if(process.env.TTS_TYPE === "speecht5"){
-        console.log('> Using SpeechT5 TTS');
+        logToConsole('> Using SpeechT5 TTS', 'info', 2);
         const response = await axios.post(process.env.TTS_ENDPOINT + '/synthesize', {
           text: chunk,
         }, {
@@ -386,7 +386,7 @@ async function sendToTTS(text, userid, connection, channel) {
         }
       }
       else{
-        console.log('> Using OpenAI TTS');
+        logToConsole('> Using OpenAI TTS', 'info', 2);
 
         const response = await axios.post(process.env.OPENAI_TTS_ENDPOINT + '/v1/audio/speech', {
           model: process.env.TTS_MODEL,
@@ -411,21 +411,21 @@ async function sendToTTS(text, userid, connection, channel) {
           audioqueue.push({ file: filename, index: chunks.indexOf(chunk) });
 
           if (audioqueue.length === 1) {
-            console.log('> Playing audio queue');
+            logToConsole('> Playing audio queue', 'info', 2);
             playAudioQueue(connection, channel, userid);
           }
         }
       }
     } catch (error) {
       currentlythinking = false;
-      console.error('Failed to send text to TTS:', error);
+      logToConsole(`X Failed to send text to TTS: ${error.message}`, 'error', 1);
     }
   }
 }
 
 async function sendToRVC(file, userid, connection, channel) {
   try {
-    console.log('> Sending TTS to RVC');
+    logToConsole('> Sending TTS to RVC', 'info', 2);
 
     let mp3name = file.replace('tts', 'rvc');
     mp3name = mp3name.replace('mp3', 'wav');
@@ -472,16 +472,16 @@ async function sendToRVC(file, userid, connection, channel) {
       audioqueue.push({ file: mp3name, index: mp3index });
 
       if (audioqueue.length === 1) {
-        console.log('> Playing audio queue');
+        logToConsole('> Playing audio queue', 'info', 2);
         playAudioQueue(connection, channel, userid);
       }
     })
     .catch(function (error) {
-      console.error(error);
+      logToConsole(`X Failed to send tts to RVC: ${error.message}`, 'error', 1);
     });
   } catch (error) {
     currentlythinking = false;
-    console.error('Failed to send tts to RVC:', error);
+    logToConsole(`X Failed to send tts to RVC: ${error.message}`, 'error', 1);
   }
 }
 
@@ -490,7 +490,6 @@ let retryCount = 0;
 const maxRetries = 5; // Maximum number of retries before giving up
 
 async function playAudioQueue(connection, channel, userid) {
-  console.log(audioqueue);
   // Sort the audioqueue based on the index to ensure the correct play order
   audioqueue.sort((a, b) => a.index - b.index);
 
@@ -512,7 +511,7 @@ async function playAudioQueue(connection, channel, userid) {
         try {
           fs.unlinkSync(audio.file);
         } catch (err) {
-          console.warn('Failed to delete file.');
+          logToConsole(`X Failed to delete file: ${err.message}`, 'error', 1);
         }
 
         // Remove the played audio from the queue
@@ -527,11 +526,11 @@ async function playAudioQueue(connection, channel, userid) {
           audioqueue = [];
           currentIndex = 0;
           retryCount = 0;
-          console.log('Audio queue finished.');
+          logToConsole('> Audio queue finished.', 'info', 2);
         }
       });
 
-      player.on('error', error => console.error(`Error: ${error.message}`));
+      player.on('error', error => logToConsole(`Error: ${error.message}`, 'error', 1));
 
       break; // Exit the while loop after setting up the player for the current index
     } else {
@@ -544,7 +543,7 @@ async function playAudioQueue(connection, channel, userid) {
         audioqueue = [];
         currentIndex = 0;
         retryCount = 0;
-        console.log(`Failed to find audio with index ${currentIndex} after ${maxRetries} retries.`);
+        logToConsole(`X Failed to find audio with index ${currentIndex} after ${maxRetries} retries.`, 'error', 1);
         break; // Give up after exceeding retry limit
       }
     }
@@ -559,7 +558,7 @@ async function playSound(connection, sound) {
 
   // Check if the sound file exists
   if (!fs.existsSync(`./sounds/${sound}.mp3`)) {
-    console.error(`Sound file not found: ${sound}.mp3`);
+    logToConsole(`X Sound file not found: ${sound}.mp3`, 'error', 1);
     return;
   }
 
@@ -573,11 +572,29 @@ async function playSound(connection, sound) {
   connection.subscribe(player);
   player.play(resource);
 
-  player.on('error', error => console.error(`Error: ${error.message}`));
+  player.on('error', error => logToConsole(`Error: ${error.message}`, 'error', 1));
 }
 
 function restartListening(userID, connection, channel) {
   handleRecordingForUser(userID, connection, channel);
+}
+
+function logToConsole(message, level, type) {
+  switch (level) {
+    case 'info':
+      if (process.env.LOG_TYPE >= type) {
+        console.info(message);
+      }
+      break;
+    case 'warn':
+      if (process.env.LOG_TYPE >= type) {
+        console.warn(message);
+      }
+      break;
+    case 'error':
+      console.error(message);
+      break;
+  }
 }
 
 client.login(TOKEN);
