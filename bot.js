@@ -296,10 +296,10 @@ async function sendToLLM(transcription, userId, connection, channel) {
       messages: messages,
     })
     .then((response) => {
-      const { message } = response.data;
-      logToConsole(`> LLM Response: ${message.content}`, 'info', 1);
+      const llmresponse = response.data.choices[0].message.content;
+      logToConsole(`> LLM Response: ${llmresponse}`, 'info', 1);
 
-      if(message.content.includes("IGNORING")){
+      if(llmresponse.includes("IGNORING")){
         currentlythinking = false;
         logToConsole('> LLM Ignored the command.', 'info', 2);
         return;
@@ -308,7 +308,7 @@ async function sendToLLM(transcription, userId, connection, channel) {
       // Store the LLM's response in the history
       messages.push({
         role: 'assistant',
-        content: message.content
+        content: llmresponse
       });
       
       // Update the chat history
@@ -316,7 +316,7 @@ async function sendToLLM(transcription, userId, connection, channel) {
 
       // Send response to TTS service
       playSound(connection, 'result');
-      sendToTTS(message.content, userId, connection, channel);
+      sendToTTS(llmresponse, userId, connection, channel);
     })
     .catch((error) => {
       currentlythinking = false;
