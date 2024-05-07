@@ -18,7 +18,7 @@ if (!Array.isArray(botnames)) {
   logToConsole('BOT_TRIGGERS must be an array of strings', 'error', 1);
   process.exit(1);
 }
-logToConsole('Bot Triggers: ' + botnames, 'info', 1);
+logToConsole(`Bot triggers: ${BOT_TRIGGERS}`, 'info', 1);
 let chatHistory = {};
 
 let allowwithouttrigger = false;
