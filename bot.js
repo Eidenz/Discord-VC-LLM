@@ -12,6 +12,8 @@ const { google } = require('googleapis');
 const { log } = require('console');
 const { send } = require('process');
 
+let connection = null;
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
@@ -31,6 +33,7 @@ logToConsole(`Bot triggers: ${botnames}`, 'info', 1);
 let chatHistory = {};
 
 let allowwithouttrigger = false;
+let allowwithoutbip = false;
 let currentlythinking = false;
 
 // Create the directories if they don't exist
@@ -58,43 +61,74 @@ client.on('ready', () => {
 });
 
 client.on('messageCreate', async message => {
-  if (message.content === '>join') {
-    allowwithouttrigger = false;
-    if (message.member.voice.channel) {
-      // Delete user's message for spam
-      message.delete();
+  switch (message.content.split(' ')[0]) {
+    case '>join':
+      allowwithouttrigger = false;
+      if (message.member.voice.channel) {
+        // Delete user's message for spam
+        message.delete();
 
-      const connection = joinVoiceChannel({
-        channelId: message.member.voice.channel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator,
-        selfDeaf: false,
-      });
-      handleRecording(connection, message.member.voice.channel);
-    } else {
-      message.reply('You need to join a voice channel first!');
-    }
-  }
-  if (message.content === '>join free') {
-    allowwithouttrigger = true;
-    if (message.member.voice.channel) {
-      // Delete user's message for spam
-      message.delete();
+        connection = joinVoiceChannel({
+          channelId: message.member.voice.channel.id,
+          guildId: message.guild.id,
+          adapterCreator: message.guild.voiceAdapterCreator,
+          selfDeaf: false,
+        });
+        handleRecording(connection, message.member.voice.channel);
+      } else {
+        message.reply('You need to join a voice channel first!');
+      }
+      break;
+    case '>join silent':
+      allowwithouttrigger = false;
+      allowwithoutbip = true;
+      if (message.member.voice.channel) {
+        // Delete user's message for spam
+        message.delete();
 
-      const connection = joinVoiceChannel({
-        channelId: message.member.voice.channel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator,
-        selfDeaf: false,
-      });
-      handleRecording(connection, message.member.voice.channel);
-    } else {
-      message.reply('You need to join a voice channel first!');
-    }
-  }
-  if (message.content === '>reset') {
-    chatHistory = {};
-    message.reply('> Chat history reset!');
+        connection = joinVoiceChannel({
+          channelId: message.member.voice.channel.id,
+          guildId: message.guild.id,
+          adapterCreator: message.guild.voiceAdapterCreator,
+          selfDeaf: false,
+        });
+        handleRecording(connection, message.member.voice.channel);
+      } else {
+        message.reply('You need to join a voice channel first!');
+      }
+      break;
+    case '>join free':
+      allowwithouttrigger = true;
+      if (message.member.voice.channel) {
+        // Delete user's message for spam
+        message.delete();
+
+        connection = joinVoiceChannel({
+          channelId: message.member.voice.channel.id,
+          guildId: message.guild.id,
+          adapterCreator: message.guild.voiceAdapterCreator,
+          selfDeaf: false,
+        });
+        handleRecording(connection, message.member.voice.channel);
+      } else {
+        message.reply('You need to join a voice channel first!');
+      }
+      break;
+    case '>reset':
+      chatHistory = {};
+      message.reply('> Chat history reset!');
+      break;
+    case '>play':
+      if (message.member.voice.channel) {
+        // Play YouTube video
+        seatchAndPlayYouTube(message.content.replace('>play', '').trim(), message.author.id, connection, message.member.voice.channel);
+      } else {
+        message.reply('You need to join a voice channel first!');
+      }
+      break;
+    case '>help':
+      message.reply('Commands: \n>join - Join voice channel and start listening for trigger words \n>join silent - Join voice channel without the confirmation sounds \n>join free - Join voice channel and listen without trigger words \n>reset - Reset chat history \n>play [song name or URL] - Play a song from YouTube');
+      break;
   }
 });
 
@@ -580,7 +614,7 @@ async function playAudioQueue(connection, channel, userid) {
 
 async function playSound(connection, sound) {
   // Check if allowwithouttrigger is true, if yes ignore
-  if (allowwithouttrigger && sound !== 'command') {
+  if ((allowwithouttrigger || allowwithoutbip) && sound !== 'command') {
     return;
   }
 
@@ -608,7 +642,12 @@ function restartListening(userID, connection, channel) {
 }
 
 async function seatchAndPlayYouTube(songName, userid, connection, channel) {
-  const videoUrl = await searchYouTube(songName);
+  // Check if songName is actually a YouTube URL
+  let videoUrl = songName;
+  if (!songName.includes('youtube.com')){
+    videoUrl = await searchYouTube(songName);
+  }
+
   if (!videoUrl) {
       // If no video was found, voice it out
       sendToTTS('Sorry, I could not find the requested song.', userid, connection, channel);
