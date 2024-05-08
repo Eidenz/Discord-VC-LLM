@@ -63,42 +63,18 @@ client.on('ready', () => {
 client.on('messageCreate', async message => {
   switch (message.content.split(' ')[0]) {
     case '>join':
+      allowwithoutbip = false;
       allowwithouttrigger = false;
-      if (message.member.voice.channel) {
-        // Delete user's message for spam
-        message.delete();
 
-        connection = joinVoiceChannel({
-          channelId: message.member.voice.channel.id,
-          guildId: message.guild.id,
-          adapterCreator: message.guild.voiceAdapterCreator,
-          selfDeaf: false,
-        });
-        handleRecording(connection, message.member.voice.channel);
-      } else {
-        message.reply('You need to join a voice channel first!');
+      // Check if second argument is silent
+      if (message.content.split(' ')[1] === 'silent') {
+        allowwithoutbip = true;
       }
-      break;
-    case '>join silent':
+      else if (message.content.split(' ')[1] === 'free') {
+        allowwithouttrigger = true;
+      }
+
       allowwithouttrigger = false;
-      allowwithoutbip = true;
-      if (message.member.voice.channel) {
-        // Delete user's message for spam
-        message.delete();
-
-        connection = joinVoiceChannel({
-          channelId: message.member.voice.channel.id,
-          guildId: message.guild.id,
-          adapterCreator: message.guild.voiceAdapterCreator,
-          selfDeaf: false,
-        });
-        handleRecording(connection, message.member.voice.channel);
-      } else {
-        message.reply('You need to join a voice channel first!');
-      }
-      break;
-    case '>join free':
-      allowwithouttrigger = true;
       if (message.member.voice.channel) {
         // Delete user's message for spam
         message.delete();
@@ -265,6 +241,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         const songTriggers = [['play', 'song'], ['play', 'youtube']];
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
         const stopTriggers = ['stop', 'playback'];
+        const internetTriggers = ['search', 'internet'];
 
         if (stopTriggers.some(trigger => transcription.toLowerCase().includes(trigger))) {
           playSound(connection, 'command');
@@ -298,6 +275,18 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           }
           // Send to timer API
           setTimer(transcription, userId, connection, channel);
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (internetTriggers.some(trigger => transcription.toLowerCase().includes(trigger))) {
+          currentlythinking = true;
+          playSound(connection, 'understood');
+          // Remove the internet triggers from the transcription
+          for (const word of internetTriggers) {
+            transcription = transcription.replace(word, '').trim();
+          }
+          // Send to search API
+          sendToPerplexity(transcription, userId, connection, channel);
           restartListening(userId, connection, channel);
           return;
         }
@@ -371,6 +360,77 @@ async function sendToLLM(transcription, userId, connection, channel) {
     // Chat completion without streaming
     client.post('/chat/completions', {
       model: process.env.LLM,
+      messages: messages,
+    })
+    .then((response) => {
+      const llmresponse = response.data.choices[0].message.content;
+      logToConsole(`> LLM Response: ${llmresponse}`, 'info', 1);
+
+      if(llmresponse.includes("IGNORING")){
+        currentlythinking = false;
+        logToConsole('> LLM Ignored the command.', 'info', 2);
+        return;
+      }
+
+      // Store the LLM's response in the history
+      messages.push({
+        role: 'assistant',
+        content: llmresponse
+      });
+      
+      // Update the chat history
+      chatHistory[userId] = messages;
+
+      // Send response to TTS service
+      playSound(connection, 'result');
+      sendToTTS(llmresponse, userId, connection, channel);
+    })
+    .catch((error) => {
+      currentlythinking = false;
+      logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
+    });
+  } catch (error) {
+    currentlythinking = false;
+    logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
+  }
+}
+
+async function sendToPerplexity(transcription, userId, connection, channel) {
+  let messages = chatHistory[userId] || [];
+
+  // Return error if perplexity key is missing
+  if(process.env.PERPLEXITY_API === undefined || process.env.PERPLEXITY_API === "" || process.env.PERPLEXITY_MODEL === "MY_PERPLEXITY_API_KEY"){
+    logToConsole('X Perplexity API key is missing', 'error', 1);
+    sendToTTS('Sorry, I do not have access to internet. You may add a Perplexity API key to add this feature.', userId, connection, channel);
+    return;
+  }
+
+  // System prompt not allowed on Perplexity search
+  
+  // Add the user's message to the chat history
+  messages.push({
+    role: 'user',
+    content: transcription
+  });
+
+  // Keep only the latest X messages
+  const messageCount = messages.length;
+  if (messageCount > process.env.MEMORY_SIZE) {
+    messages = messages.slice(messageCount - process.env.MEMORY_SIZE);
+  }
+
+  try {
+    const client = axios.create({
+      baseURL: process.env.PERPLEXITY_ENDPOINT,
+      headers: {
+        'Authorization': `Bearer ${process.env.PERPLEXITY_API}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    // Chat completion without streaming
+    client.post('/chat/completions', {
+      model: process.env.PERPLEXITY_MODEL,
       messages: messages,
     })
     .then((response) => {
@@ -722,8 +782,9 @@ function logToConsole(message, level, type) {
 }
 
 async function searchYouTube(query) {
-  if(process.env.YOUTUBE_API === undefined || process.env.YOUTUBE_API === ""){
+  if(process.env.YOUTUBE_API === undefined || process.env.YOUTUBE_API === "" || process.env.YOUTUBE_API === "MY_YOUTUBE_API_KEY"){
     logToConsole('X YouTube API key is missing', 'error', 1);
+    sendToTTS('Sorry, I do not have access to YouTube. You may add a YouTube API key to add this feature.', userid, connection, channel);
     return null;
   }
   const res = await youtube.search.list({
