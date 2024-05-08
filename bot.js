@@ -197,7 +197,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     // If alarm is ongoing and transcription is 'stop', stop the alarm
-    if ((alarmongoing || currentlythinking) && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
+    if ((alarmongoing || currentlythinking) && (transcription.toLowerCase().replace(/[,\.]/g, '').includes('stop'))) {
       playSound(connection, 'command');
       alarmongoing = false;
       currentlythinking = false;
@@ -214,7 +214,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     }
 
     // Check if transcription is a command
-    if (transcription.toLowerCase().includes("reset") && transcription.toLowerCase().includes("chat") && transcription.toLowerCase().includes("history")) {
+    if (transcription.toLowerCase().replace(/[,\.]/g, '').includes("reset") && transcription.toLowerCase().replace(/[,\.]/g, '').includes("chat") && transcription.toLowerCase().replace(/[,\.]/g, '').includes("history")) {
       playSound(connection, 'command');
       currentlythinking = false;
       chatHistory = {};
@@ -222,7 +222,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       restartListening(userId, connection, channel);
       return;
     }
-    else if (transcription.toLowerCase().includes("leave") && transcription.toLowerCase().includes("voice") && transcription.toLowerCase().includes("chat")) {
+    else if (transcription.toLowerCase().replace(/[,\.]/g, '').includes("leave") && transcription.toLowerCase().replace(/[,\.]/g, '').includes("voice") && transcription.toLowerCase().replace(/[,\.]/g, '').includes("chat")) {
       playSound(connection, 'command');
       currentlythinking = false;
       connection.destroy();
@@ -254,7 +254,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
         const internetTriggers = ['search', 'internet'];
 
-        if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+        if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().replace(/[,\.]/g, '').includes(trigger)))) {
           currentlythinking = true;
           playSound(connection, 'understood');
           // Remove the song triggers from the transcription
@@ -267,7 +267,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           restartListening(userId, connection, channel);
           return;
         }
-        else if (timerTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+        else if (timerTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().replace(/[,\.]/g, '').includes(trigger)))) {
           currentlythinking = true;
           playSound(connection, 'understood');
           // Determine if the timer is for an alarm or a timer
@@ -284,7 +284,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           restartListening(userId, connection, channel);
           return;
         }
-        else if (internetTriggers.some(trigger => transcription.toLowerCase().includes(trigger))) {
+        else if (internetTriggers.some(trigger => transcription.toLowerCase().replace(/[,\.]/g, '').includes(trigger))) {
           currentlythinking = true;
           playSound(connection, 'understood');
           // Remove the internet triggers from the transcription
