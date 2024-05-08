@@ -196,6 +196,17 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     let transcription = response.data.text;
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
+    // If alarm is ongoing and transcription is 'stop', stop the alarm
+    if (alarmongoing && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
+      playSound(connection, 'command');
+      alarmongoing = false;
+      currentlythinking = false;
+      audioqueue = [];
+      logToConsole('> Alarm stopped.', 'info', 1);
+      restartListening(userId, connection, channel);
+      return;
+    }
+
     if(currentlythinking){
       logToConsole('> Bot is already thinking, ignoring transcription.', 'info', 2);
       restartListening(userId, connection, channel);
@@ -225,15 +236,6 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const regex = new RegExp(`\\b${name}\\b`, 'i');
       return regex.test(transcription) || allowwithouttrigger;
     })) {
-        // If alarm is ongoing and transcription is 'stop', stop the alarm
-        if (alarmongoing && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
-          playSound(connection, 'command');
-          alarmongoing = false;
-          logToConsole('> Alarm stopped.', 'info', 1);
-          restartListening(userId, connection, channel);
-          return;
-        }
-
         // Ignore if the string is a single word
         if (transcription.split(' ').length <= 1) {
           currentlythinking = false;
