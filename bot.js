@@ -197,7 +197,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     // If alarm is ongoing and transcription is 'stop', stop the alarm
-    if (alarmongoing && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
+    if ((alarmongoing || currentlythinking) && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
       playSound(connection, 'command');
       alarmongoing = false;
       currentlythinking = false;
@@ -252,18 +252,9 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         // CHeck if transcription is requesting a song
         const songTriggers = [['play', 'song'], ['play', 'youtube']];
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
-        const stopTriggers = ['stop', 'playback'];
         const internetTriggers = ['search', 'internet'];
 
-        if (stopTriggers.some(trigger => transcription.toLowerCase().includes(trigger))) {
-          playSound(connection, 'command');
-          currentlythinking = false;
-          audioqueue = [];
-          logToConsole('> Bot stopped thinking.', 'info', 1);
-          restartListening(userId, connection, channel);
-          return;
-        }
-        else if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+        if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
           currentlythinking = true;
           playSound(connection, 'understood');
           // Remove the song triggers from the transcription
