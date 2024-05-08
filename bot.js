@@ -413,6 +413,13 @@ async function sendToPerplexity(transcription, userId, connection, channel) {
     return;
   }
 
+  // Refuse if perplexity is not allowed
+  if(process.env.PERPLEXITY === "false"){
+    logToConsole('X Perplexity is not allowed', 'error', 1);
+    sendToTTS('Sorry, I am not allowed to search the internet.', userId, connection, channel);
+    return;
+  }
+
   // System prompt not allowed on Perplexity search
   
   // Add the user's message to the chat history
@@ -796,15 +803,67 @@ async function searchYouTube(query) {
     sendToTTS('Sorry, I do not have access to YouTube. You may add a YouTube API key to add this feature.', userid, connection, channel);
     return null;
   }
-  const res = await youtube.search.list({
-      part: 'snippet',
-      q: query,
-      maxResults: 1,
-      type: 'video'
+
+  // Try removing unwanted words from the query:
+  // If it starts with Hey and have a comma, remove everything before the comma and the comma
+  // if it ends with "on" or "in", remove the last word
+  const unwantedWords = ['hey', 'on', 'in'];
+  const queryWords = query.split(' ');
+  if (queryWords[0].toLowerCase() === 'hey' && query.includes(',')) {
+    query = query.split(',').slice(1).join(',');
+  }
+  if (unwantedWords.includes(queryWords[queryWords.length - 1].toLowerCase())) {
+    query = query.split(' ').slice(0, -1).join(' ');
+  }
+
+  logToConsole(`> Searching YouTube for: ${query}`, 'info', 1);
+
+  try {
+    // First, search for videos
+    const searchRes = await youtube.search.list({
+        part: 'snippet',
+        q: query,
+        maxResults: 10,
+        type: 'video'
+    });
+
+    const videoIds = searchRes.data.items.map(item => item.id.videoId).join(',');
+
+    // Then, get details of these videos
+    const detailsRes = await youtube.videos.list({
+        part: 'snippet,contentDetails,statistics',
+        id: videoIds,
+        key: process.env.YOUTUBE_API_KEY
+    });
+
+    // Filter and sort videos by duration and view count
+    const validVideos = detailsRes.data.items.filter(video => {
+        const duration = video.contentDetails.duration;
+        return convertDuration(duration) >= 30;
+    }).sort((a, b) => b.statistics.viewCount - a.statistics.viewCount);
+
+    if (!validVideos.length) return null;
+    return `https://www.youtube.com/watch?v=${validVideos[0].id}`;
+  } catch (error) {
+      console.error('Failed to fetch YouTube data:', error);
+      return null;
+  }
+}
+
+function convertDuration(duration) {
+  let totalSeconds = 0;
+  const matches = duration.match(/(\d+)(?=[MHS])/ig) || [];
+
+  const parts = matches.map((part, i) => {
+      if (i === 0) return parseInt(part) * 3600;
+      else if (i === 1) return parseInt(part) * 60;
+      else return parseInt(part);
   });
-  const videos = res.data.items;
-  if (!videos.length) return null;
-  return `https://www.youtube.com/watch?v=${videos[0].id.videoId}`;
+
+  if (parts.length > 0) {
+      totalSeconds = parts.reduce((a, b) => a + b);
+  }
+  return totalSeconds;
 }
 
 async function setTimer(query, type = 'alarm', userid, connection, channel) {
