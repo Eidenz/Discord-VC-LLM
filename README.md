@@ -2,6 +2,12 @@
 
 This Discord bot uses voice recognition to interact with users in a voice channel through transcription, processing with a Large Language Model (LLM), and responding with synthesized voice. The bot converts spoken audio to text, sends it to an LLM for processing, and uses Text-to-Speech (TTS) to voice the response.
 
+## Features
+- Conversation: Engage in a conversation with the bot using voice input.
+- Music Playback: Play music from YouTube in the voice channel. Say `play [song name] on youtube` or `play [music] song` to play a song. You can also use the `>play` command.
+- Timers: Set a timer by saying `set a timer for [time]` or `set an alarm for [time]`. The bot will notify you when the timer is up.
+- Internet search: Ask the bot to search the internet for you by saying `search [query] on internet`. The bot will respond using the web.
+
 ## Prerequisites
 
 - Node.js and npm installed
