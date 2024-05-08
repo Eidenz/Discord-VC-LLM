@@ -56,11 +56,6 @@ https://discord.com/oauth2/authorize?client_id=REPLACEME&permissions=96422051641
 - `>reset`: Reset the LLM chat history.
 - `>help`: Display the list of available commands.
 
-## Features
-- **Real-time Voice Recognition**: Transcribes user speech in real-time.
-- **Integration with LLM**: Processes transcriptions through a custom LLM to generate responses.
-- **Voice Responses**: Uses TTS to convert text responses into speech, playing them back into the voice channel.
-
 ## Troubleshooting
 - **Bot Doesn't Join Channel**: Ensure the bot has the correct permissions in your Discord server, including the ability to join and speak in voice channels.
 - **No Audio from Bot**: Check that the TTS API is returning valid MP3 audio data and that the bot has permissions to play audio in the channel.
