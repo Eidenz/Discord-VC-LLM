@@ -815,7 +815,7 @@ async function setTimer(query, userid, connection, channel) {
   sendToTTS(`Timer set for ${time} ${timeUnit}`, userid, connection, channel);
   logToConsole(`> Timer set for ${time} ${timeUnit}`, 'info', 1);
   setTimeout(() => {
-    playSound(connection, 'alarm', 0.05);
+    playSound(connection, 'alarm', process.env.ALARM_VOLUME);
     logToConsole('> Timer finished.', 'info', 1);
   }, ms);
 
