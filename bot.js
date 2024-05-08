@@ -828,7 +828,7 @@ async function setTimer(query, type = 'alarm', userid, connection, channel) {
   const time = parseInt(timeValue[0]);
   const ms = timeUnit.includes('minute') ? time * 60000 : timeUnit.includes('second') ? time * 1000 : time * 3600000;
 
-  sendToTTS(`Timer set for ${time} ${timeUnit}`, userid, connection, channel);
+  sendToTTS(`${type} set for ${time} ${timeUnit}`, userid, connection, channel);
   logToConsole(`> Timer set for ${time} ${timeUnit}`, 'info', 1);
   setTimeout(() => {
     alarmongoing = true;
