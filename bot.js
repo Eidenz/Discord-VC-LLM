@@ -220,15 +220,6 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     if(currentlythinking){
-      if (transcription.toLowerCase().includes("stop")) {
-        playSound(connection, 'command');
-        currentlythinking = false;
-        audioqueue = [];
-        logToConsole('> Bot stopped thinking.', 'info', 1);
-        restartListening(userId, connection, channel);
-        return;
-      }
-
       logToConsole('> Bot is already thinking, ignoring transcription.', 'info', 2);
       restartListening(userId, connection, channel);
       return;
@@ -272,7 +263,18 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
 
         // CHeck if transcription is requesting a song
         const songTriggers = [['play', 'song'], ['play', 'youtube']];
-        if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+        const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
+        const stopTriggers = ['stop', 'playback'];
+
+        if (stopTriggers.some(trigger => transcription.toLowerCase().includes(trigger))) {
+          playSound(connection, 'command');
+          currentlythinking = false;
+          audioqueue = [];
+          logToConsole('> Bot stopped thinking.', 'info', 1);
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (songTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
           currentlythinking = true;
           playSound(connection, 'understood');
           // Remove the song triggers from the transcription
@@ -281,7 +283,21 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
               transcription = transcription.replace(word, '').trim();
             }
           }
-          seatchAndPlayYouTube(songName, userId, connection, channel);
+          seatchAndPlayYouTube(transcription, userId, connection, channel);
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (timerTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
+          currentlythinking = true;
+          playSound(connection, 'understood');
+          // Remove the timer triggers from the transcription
+          for (const trigger of timerTriggers) {
+            for (const word of trigger) {
+              transcription = transcription.replace(word, '').trim();
+            }
+          }
+          // Send to timer API
+          setTimer(transcription, userId, connection, channel);
           restartListening(userId, connection, channel);
           return;
         }
@@ -612,7 +628,7 @@ async function playAudioQueue(connection, channel, userid) {
   }
 }
 
-async function playSound(connection, sound) {
+async function playSound(connection, sound, volume = 1) {
   // Check if allowwithouttrigger is true, if yes ignore
   if ((allowwithouttrigger || allowwithoutbip) && sound !== 'command') {
     return;
@@ -624,17 +640,28 @@ async function playSound(connection, sound) {
     return;
   }
 
-  // Create an audio player
+  // Create a stream from the sound file using ffmpeg
+  const stream = fs.createReadStream(`./sounds/${sound}.mp3`);
+  const ffmpegStream = ffmpeg(stream)
+    .audioFilters(`volume=${volume}`)
+    .format('opus')
+    .on('error', (err) => console.error(err))
+    .stream();
+
+  // Create an audio resource from the ffmpeg stream
+  const resource = createAudioResource(ffmpegStream);
   const player = createAudioPlayer();
 
-  // Create an audio resource from a local file
-  const resource = createAudioResource('./sounds/'+sound+'.mp3');
-
   // Subscribe the connection to the player and play the resource
-  connection.subscribe(player);
   player.play(resource);
+  connection.subscribe(player);
 
   player.on('error', error => logToConsole(`Error: ${error.message}`, 'error', 1));
+  player.on('stateChange', (oldState, newState) => {
+    if (newState.status === 'idle') {
+      logToConsole('> Finished playing sound.', 'info', 2);
+    }
+  });
 }
 
 function restartListening(userID, connection, channel) {
@@ -708,6 +735,30 @@ async function searchYouTube(query) {
   const videos = res.data.items;
   if (!videos.length) return null;
   return `https://www.youtube.com/watch?v=${videos[0].id.videoId}`;
+}
+
+async function setTimer(query, userid, connection, channel) {
+  // Check for known time units (minutes, seconds, hours) with a number
+  const timeUnits = ['minutes', 'minute', 'seconds', 'second', 'hours', 'hour'];
+  const timeUnit = timeUnits.find(unit => query.includes(unit));
+  const timeValue = query.match(/\d+/);
+
+  if (!timeUnit || !timeValue) {
+    sendToTTS('Sorry, I could not understand the requested timer.', userid, connection, channel);
+    return;
+  }
+
+  const time = parseInt(timeValue[0]);
+  const ms = timeUnit.includes('minute') ? time * 60000 : timeUnit.includes('second') ? time * 1000 : time * 3600000;
+
+  sendToTTS(`Timer set for ${time} ${timeUnit}`, userid, connection, channel);
+  logToConsole(`> Timer set for ${time} ${timeUnit}`, 'info', 1);
+  setTimeout(() => {
+    playSound(connection, 'alarm', 0.05);
+    logToConsole('> Timer finished.', 'info', 1);
+  }, ms);
+
+  restartListening(userid, connection, channel);
 }
 
 client.login(TOKEN);
