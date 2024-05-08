@@ -33,6 +33,9 @@ if (!Array.isArray(botnames)) {
 logToConsole(`Bot triggers: ${botnames}`, 'info', 1);
 let chatHistory = {};
 
+let transcribemode = false;
+let transcriptionfile = '';
+
 let allowwithouttrigger = false;
 let allowwithoutbip = false;
 let currentlythinking = false;
@@ -74,6 +77,9 @@ client.on('messageCreate', async message => {
       else if (message.content.split(' ')[1] === 'free') {
         allowwithouttrigger = true;
       }
+      else if (message.content.split(' ')[1] === 'transcribe') {
+        transcribemode = true;
+      }
 
       allowwithouttrigger = false;
       if (message.member.voice.channel) {
@@ -86,6 +92,9 @@ client.on('messageCreate', async message => {
           adapterCreator: message.guild.voiceAdapterCreator,
           selfDeaf: false,
         });
+        if(transcribemode){
+          sendToTTS('Transcription mode is enabled for this conversation. Once you type the leave command, a transcription of the conversation will be sent in the channel.', message.author.id, connection, message.member.voice.channel);
+        }
         handleRecording(connection, message.member.voice.channel);
       } else {
         message.reply('You need to join a voice channel first!');
@@ -101,6 +110,25 @@ client.on('messageCreate', async message => {
         seatchAndPlayYouTube(message.content.replace('>play', '').trim(), message.author.id, connection, message.member.voice.channel);
       } else {
         message.reply('You need to join a voice channel first!');
+      }
+      break;
+    case '>leave':
+      // Delete user's message for spam
+      message.delete();
+
+      if (connection) {
+        connection.destroy();
+        audioqueue = [];
+
+        if(transcribemode){
+          // Write the transcription to a file and send it to the channel
+          message.reply({ files: ['./transcription.txt'] }).then(() => {
+            fs.unlinkSync('./transcription.txt');
+          });
+        }
+
+        chatHistory = {};
+        logToConsole('> Left voice channel', 'info', 1);
       }
       break;
     case '>help':
@@ -196,10 +224,19 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
     let transcription = response.data.text;
     let transcriptionwithoutpunctuation = transcription.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
     transcriptionwithoutpunctuation = transcriptionwithoutpunctuation.toLowerCase();
+
+    const ignoreTriggers = ['Thank you.', 'Bye.'];
+    if (ignoreTriggers.some(trigger => transcription.includes(trigger))) {
+      currentlythinking = false;
+      logToConsole('> Ignoring background/keyboard sounds.', 'info', 2);
+      restartListening(userId, connection, channel);
+      return;
+    }
+
     logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
 
     // If alarm is ongoing and transcription is 'stop', stop the alarm
-    if ((alarmongoing || currentlythinking) && (transcriptionwithoutpunctuation.toLowerCase().includes('stop'))) {
+    if ((alarmongoing || currentlythinking) && (transcriptionwithoutpunctuation.toLowerCase().includes('stop') || transcriptionwithoutpunctuation.toLowerCase().includes('shut up') || transcriptionwithoutpunctuation.toLowerCase().includes('fuck off'))) {
       playSound(connection, 'command');
       alarmongoing = false;
       currentlythinking = false;
@@ -287,6 +324,11 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           return;
         }
         else if (internetTriggers.some(trigger => transcriptionwithoutpunctuation.includes(trigger))) {
+          // Remove unwanted words from the transcription:
+          // "for" after "search" or "internet"
+          transcription = transcription.replace(/search for/g, 'search');
+          transcription = transcription.replace(/internet for/g, 'internet');
+
           currentlythinking = true;
           playSound(connection, 'understood');
           // Remove the internet triggers from the transcription
@@ -388,6 +430,17 @@ async function sendToLLM(transcription, userId, connection, channel) {
       
       // Update the chat history
       chatHistory[userId] = messages;
+
+      // Update the transcription file if transcribe mode is enabled
+      if (transcribemode) {
+        // Check if the transcription file exists, if not create it
+        if (!fs.existsSync('./transcription.txt')) {
+          fs.writeFileSync('./transcription.txt', '');
+        }
+
+        // Append the transcription to the file
+        fs.appendFileSync('./transcription.txt', `${userId}: ${transcription}\n\nAssistant: ${llmresponse}\n\n`);
+      }
 
       // Send response to TTS service
       playSound(connection, 'result');

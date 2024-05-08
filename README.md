@@ -6,7 +6,7 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 - __Conversation:__ Engage in a conversation with the bot using voice input.
 - __Music Playback:__ Play music from YouTube in the voice channel. Say `play [song name] on youtube` or `play [music] song` to play a song. You can also use the `>play` command.
 - __Timers:__ Set a timer by saying `set a timer for [time]` or `set an alarm for [time]`. The bot will notify you when the timer is up.
-- __Internet search:__ Ask the bot to search the internet for you by saying `search [query] on internet`. The bot will respond using the web.
+- __Internet search:__ Ask the bot to search the internet for you by saying `search [query] on internet` or `search on internet for [query]`. The bot will respond using the web.
 
 ## Prerequisites
 
