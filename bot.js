@@ -13,6 +13,7 @@ const { log } = require('console');
 const { send } = require('process');
 
 let connection = null;
+let alarmongoing = false;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -224,6 +225,15 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const regex = new RegExp(`\\b${name}\\b`, 'i');
       return regex.test(transcription) || allowwithouttrigger;
     })) {
+        // If alarm is ongoing and transcription is 'stop', stop the alarm
+        if (alarmongoing && (transcription.toLowerCase().includes('stop') || transcription.toLowerCase().includes('stop.'))) {
+          playSound(connection, 'command');
+          alarmongoing = false;
+          logToConsole('> Alarm stopped.', 'info', 1);
+          restartListening(userId, connection, channel);
+          return;
+        }
+
         // Ignore if the string is a single word
         if (transcription.split(' ').length <= 1) {
           currentlythinking = false;
@@ -267,6 +277,9 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         else if (timerTriggers.some(triggers => triggers.every(trigger => transcription.toLowerCase().includes(trigger)))) {
           currentlythinking = true;
           playSound(connection, 'understood');
+          // Determine if the timer is for an alarm or a timer
+          const timertype = transcription.toLowerCase().includes('alarm') ? 'alarm' : 'timer';
+
           // Remove the timer triggers from the transcription
           for (const trigger of timerTriggers) {
             for (const word of trigger) {
@@ -274,7 +287,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
             }
           }
           // Send to timer API
-          setTimer(transcription, userId, connection, channel);
+          setTimer(transcription, timertype, userId, connection, channel);
           restartListening(userId, connection, channel);
           return;
         }
@@ -719,6 +732,7 @@ async function playSound(connection, sound, volume = 1) {
   player.on('error', error => logToConsole(`Error: ${error.message}`, 'error', 1));
   player.on('stateChange', (oldState, newState) => {
     if (newState.status === 'idle') {
+      alarmongoing = false;
       logToConsole('> Finished playing sound.', 'info', 2);
     }
   });
@@ -798,7 +812,7 @@ async function searchYouTube(query) {
   return `https://www.youtube.com/watch?v=${videos[0].id.videoId}`;
 }
 
-async function setTimer(query, userid, connection, channel) {
+async function setTimer(query, type = 'alarm', userid, connection, channel) {
   // Check for known time units (minutes, seconds, hours) with a number
   const timeUnits = ['minutes', 'minute', 'seconds', 'second', 'hours', 'hour'];
   const timeUnit = timeUnits.find(unit => query.includes(unit));
@@ -815,7 +829,8 @@ async function setTimer(query, userid, connection, channel) {
   sendToTTS(`Timer set for ${time} ${timeUnit}`, userid, connection, channel);
   logToConsole(`> Timer set for ${time} ${timeUnit}`, 'info', 1);
   setTimeout(() => {
-    playSound(connection, 'alarm', process.env.ALARM_VOLUME);
+    alarmongoing = true;
+    playSound(connection, type, process.env.ALARM_VOLUME);
     logToConsole('> Timer finished.', 'info', 1);
   }, ms);
 
