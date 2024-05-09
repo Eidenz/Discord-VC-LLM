@@ -95,6 +95,7 @@ client.on('messageCreate', async message => {
         if(transcribemode){
           sendToTTS('Transcription mode is enabled for this conversation. Once you type the leave command, a transcription of the conversation will be sent in the channel.', message.author.id, connection, message.member.voice.channel);
         }
+        logToConsole('> Joined voice channel', 'info', 1);
         handleRecording(connection, message.member.voice.channel);
       } else {
         message.reply('You need to join a voice channel first!');
@@ -103,6 +104,7 @@ client.on('messageCreate', async message => {
     case '>reset':
       chatHistory = {};
       message.reply('> Chat history reset!');
+      logToConsole('> Chat history reset!', 'info', 1);
       break;
     case '>play':
       if (message.member.voice.channel) {
@@ -134,6 +136,14 @@ client.on('messageCreate', async message => {
     case '>help':
       message.reply('Commands: \n>join - Join voice channel and start listening for trigger words \n>join silent - Join voice channel without the confirmation sounds \n>join free - Join voice channel and listen without trigger words \n>reset - Reset chat history \n>play [song name or URL] - Play a song from YouTube');
       break;
+  }
+
+  // Check if the bot was mentioned with a picture attached
+  if (message.member.voice.channel && message.mentions.has(client.user) && message.attachments.size > 0) {
+    // Get image URL from the message
+    const imageUrl = message.attachments.first().url;
+    const userId = message.author.id;
+    captionImage(imageUrl, userId, connection, message.member.voice.channel);
   }
 });
 
@@ -942,6 +952,30 @@ async function setTimer(query, type = 'alarm', userid, connection, channel) {
   }, ms);
 
   restartListening(userid, connection, channel);
+}
+
+async function captionImage(imageUrl, userId, connection, channel) {
+  const headers = {
+      'Authorization': `Bearer ${process.env.HUGGING_FACE_API}`
+  };
+
+  try {
+      const response = await axios.post(process.env.VISION_ENDPOINT + '/' + process.env.VISION_MODEL, {
+          inputs: {
+              url: imageUrl, // Some models might require a different format
+          },
+      }, { headers: headers });
+
+      const caption = response.data[0].generated_text;
+      currentlythinking = true;
+      logToConsole(`> Image caption: ${caption}`, 'info', 1);
+
+      // Send the caption to the LLM
+      sendToLLM("*the user sent the following image in a text channel*: " + caption, userId, connection, channel);
+  } catch (error) {
+      logToConsole(`X Failed to caption image: ${error.message}`, 'error', 1);
+      sendToTTS('Sorry, I cannot see the image.', userId, connection, channel);
+  }
 }
 
 client.login(TOKEN);
