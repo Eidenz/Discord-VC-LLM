@@ -10,6 +10,7 @@ const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
 const { send } = require('process');
+const { log } = require('console');
 
 let alarms = [];
 
@@ -157,6 +158,14 @@ client.on('messageCreate', async message => {
     const imageUrl = message.attachments.first().url;
     const userId = message.author.id;
     captionImage(imageUrl, userId, connection, message.member.voice.channel);
+  }
+});
+
+// If bot is in voice channel and a user joins, start listening to them
+client.on('voiceStateUpdate', (oldState, newState) => {
+  if (connection && newState.channelId === connection.joinConfig.channelId) {
+    logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
+    handleRecordingForUser(newState.member.user.id, connection, newState.channel);
   }
 });
 
