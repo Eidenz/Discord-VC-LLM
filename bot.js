@@ -169,7 +169,7 @@ function handleRecording(connection, channel) {
     const listenStream = receiver.subscribe(member.user.id, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
-        duration: 2000,
+        duration: 1000,
       },
     });
 
