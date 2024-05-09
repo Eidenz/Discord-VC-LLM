@@ -9,8 +9,6 @@ const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
-const { log } = require('console');
-const { send } = require('process');
 
 let connection = null;
 let alarmongoing = false;
@@ -134,7 +132,16 @@ client.on('messageCreate', async message => {
       }
       break;
     case '>help':
-      message.reply('Commands: \n>join - Join voice channel and start listening for trigger words \n>join silent - Join voice channel without the confirmation sounds \n>join free - Join voice channel and listen without trigger words \n>reset - Reset chat history \n>play [song name or URL] - Play a song from YouTube');
+      message.reply(`Commands: \n
+      \`>join\` - Join voice channel and start listening for trigger words. \n
+      \`>join silent\` - Join voice channel without the confirmation sounds. \n
+      \`>join free\` - Join voice channel and listen without trigger words. \n
+      \`>join transcribe\` - Join voice channel and save the conversation to a file which will be sent when using \`>leave\` command. \n
+      \`>reset\` - Reset chat history. You may also say \`reset chat history\` in voice chat. \n
+      \`>play\` [song name or URL] - Play a song from YouTube. You may also say \`play [query] on YouTube\` or \`play [query] song\` with the bot trigger word. \n
+      \`>leave\` - Leave voice channel. You may also say \`leave voice chat\` in voice chat. \n
+      \`>help\` - Display this message. \n\n
+      __Notes:__\nIf vision is enabled, sending an image mentioning the bot will have it react to it in voice chat.\nA valid API key is required for the YouTube feature.`);
       break;
   }
 
