@@ -250,13 +250,12 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
 
     const ignoreTriggers = ['Thank you.', 'Bye.'];
     if (ignoreTriggers.some(trigger => transcription.includes(trigger))) {
-      currentlythinking = false;
       logToConsole('> Ignoring background/keyboard sounds.', 'info', 2);
       restartListening(userId, connection, channel);
       return;
     }
 
-    logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 1);
+    logToConsole(`> Transcription for ${userId}: "${transcription}"`, 'info', 2);
 
     // If alarm is ongoing and transcription is 'stop', stop the alarm
     if ((alarmongoing || currentlythinking) && (transcriptionwithoutpunctuation.toLowerCase().includes('stop') || transcriptionwithoutpunctuation.toLowerCase().includes('shut up') || transcriptionwithoutpunctuation.toLowerCase().includes('fuck off'))) {
