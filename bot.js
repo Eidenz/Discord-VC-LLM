@@ -963,7 +963,7 @@ async function searchYouTube(query) {
     const searchRes = await youtube.search.list({
         part: 'snippet',
         q: query,
-        maxResults: 10,
+        maxResults: 5,
         type: 'video'
     });
 
@@ -980,7 +980,7 @@ async function searchYouTube(query) {
     const validVideos = detailsRes.data.items.filter(video => {
         const duration = video.contentDetails.duration;
         return convertDuration(duration) >= 30;
-    }).sort((a, b) => b.statistics.viewCount - a.statistics.viewCount);
+    });
 
     if (!validVideos.length) return null;
     return `https://www.youtube.com/watch?v=${validVideos[0].id}`;
