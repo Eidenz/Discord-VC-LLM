@@ -955,6 +955,12 @@ async function setTimer(query, type = 'alarm', userid, connection, channel) {
 }
 
 async function captionImage(imageUrl, userId, connection, channel) {
+  if (process.env.HUGGING_FACE_API === undefined || process.env.HUGGING_FACE_API === "" || process.env.HUGGING_FACE_API === 'MY_HUGGING_FACE_API_KEY') {
+    logToConsole('X Hugging Face API key is missing', 'error', 1);
+    sendToTTS('Sorry, I do not have access to vision. You may add a Hugging Face API key to add this feature.', userId, connection, channel);
+    return;
+  }
+
   const headers = {
       'Authorization': `Bearer ${process.env.HUGGING_FACE_API}`
   };
