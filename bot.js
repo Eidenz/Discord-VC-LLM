@@ -315,6 +315,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
         const internetTriggers = ['search', 'internet'];
         const cancelTimerTriggers = [['cancel', 'timer'],['cancel', 'alarm'],['can sell', 'timer'],['can sell', 'alarm'],['consult', 'timer'],['consult', 'alarm']];
+        const listTimerTriggers = [['list', 'timer'],['list', 'alarm'],['least', 'timer'],['least', 'alarm'],['when', 'next', 'timer'],['when', 'next', 'alarm']];
 
         if (songTriggers.some(triggers => triggers.every(trigger => transcriptionwithoutpunctuation.includes(trigger)))) {
           currentlythinking = true;
@@ -347,6 +348,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           return;
         }
         else if (cancelTimerTriggers.some(triggers => triggers.every(trigger => transcriptionwithoutpunctuation.includes(trigger)))) {
+          playSound(connection, 'understood');
           // Remove the cancel timer triggers from the transcription
           for (const word of cancelTimerTriggers) {
             transcription = transcription.replace(word, '').trim();
@@ -399,6 +401,12 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
             }
           }
 
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (listTimerTriggers.some(triggers => triggers.every(trigger => transcriptionwithoutpunctuation.includes(trigger)))) {
+          playSound(connection, 'understood');
+          listTimers(userId, connection, channel);
           restartListening(userId, connection, channel);
           return;
         }
