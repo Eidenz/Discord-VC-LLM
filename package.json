@@ -5,7 +5,7 @@
   "main": "bot.js",
   "keywords": [],
   "author": "Eidenz",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@discordjs/voice": "^0.16.1",
     "axios": "^1.6.8",

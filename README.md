@@ -4,7 +4,7 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 
 ## Features
 - __Conversation:__ Engage in a conversation with the bot using voice input.
-- __Music Playback:__ Play music from YouTube in the voice channel. Say `play [song name] on youtube` or `play [music] song` to play a song. You can also use the `>play` command.
+- __Music Playback:__ Play music from YouTube in the voice channel. Say `play [query] on youtube` or `play [query] song` to play a song. You can also use the `>play` command.
 - __Timers:__ Set a timer by saying `set a timer for [time]` or `set an alarm for [time]`. The bot will notify you when the timer is up.
 - __Internet search:__ Ask the bot to search the internet for you by saying `search [query] on internet` or `search on internet for [query]`. The bot will respond using the web.
 - __Vision:__ Send an image mentioning the bot, and it will react to it in voice chat.
@@ -54,7 +54,7 @@ https://discord.com/oauth2/authorize?client_id=REPLACEME&permissions=96422051641
 - `>join free`: Similar to `>join`, but will respond to everything without using trigger words. Best for solo usage.
 - `>join silent`: Similar to `>join`, but no confirmation sound will play when trigger is detected/llm responded.
 - `>join transcribe`: Similar to `>join`, but will save the transcriptions to a file and send it once you use the `>leave` command.
-- `>play [song name or URL]`: Play a song from YouTube using either its name (search via API) or direct URL. Please note that the search function requires a valid API key. You may also say `play [song name] on youtube` or `play [music] song` in voice chat.
+- `>play [song name or URL]`: Play a song from YouTube using either its name (search via API) or direct URL. Please note that the search function requires a valid API key. You may also say `play [query] on youtube` or `play [query] song` in voice chat.
 - `>reset`: Reset the LLM chat history. You may also say `reset chat history` in voice chat.
 - `>leave`: Command for the bot to leave the voice channel. You may also say `leave voice chat` in voice chat.
 - `>help`: Display the list of available commands.
