@@ -110,6 +110,7 @@ client.on('messageCreate', async message => {
     case '>play':
       if (message.member.voice.channel) {
         // Play YouTube video
+        currentlythinking = true;
         seatchAndPlayYouTube(message.content.replace('>play', '').trim(), message.author.id, connection, message.member.voice.channel);
       } else {
         message.reply('You need to join a voice channel first!');
@@ -263,7 +264,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       alarmongoing = false;
       currentlythinking = false;
       audioqueue = [];
-      logToConsole('> Alarm stopped.', 'info', 1);
+      logToConsole('> Bot stopped.', 'info', 1);
       restartListening(userId, connection, channel);
       return;
     }
