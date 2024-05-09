@@ -9,6 +9,9 @@ const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
+const { send } = require('process');
+
+let alarms = [];
 
 let connection = null;
 let alarmongoing = false;
@@ -311,6 +314,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
         const songTriggers = [['play', 'song'], ['play', 'youtube']];
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
         const internetTriggers = ['search', 'internet'];
+        const cancelTimerTriggers = [['cancel', 'timer'],['cancel', 'alarm'],['can sell', 'timer'],['can sell', 'alarm'],['consult', 'timer'],['consult', 'alarm']];
 
         if (songTriggers.some(triggers => triggers.every(trigger => transcriptionwithoutpunctuation.includes(trigger)))) {
           currentlythinking = true;
@@ -339,6 +343,62 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           }
           // Send to timer API
           setTimer(transcription, timertype, userId, connection, channel);
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (cancelTimerTriggers.some(triggers => triggers.every(trigger => transcriptionwithoutpunctuation.includes(trigger)))) {
+          // Remove the cancel timer triggers from the transcription
+          for (const word of cancelTimerTriggers) {
+            transcription = transcription.replace(word, '').trim();
+          }
+
+          // Check for an ID in the transcription, else list the timers with their ID and time
+          const timerId = transcription.match(/\d+/);
+          if(!timerId){
+            const converttable = {
+              'one': 1,
+              'two': 2,
+              'three': 3,
+              'four': 4,
+              'five': 5,
+              'six': 6,
+              'seven': 7,
+              'eight': 8,
+              'nine': 9,
+              'first': 1,
+              'second': 2,
+              'third': 3,
+              'fourth': 4,
+              'fifth': 5,
+              'sixth': 6,
+              'seventh': 7,
+              'eighth': 8,
+              'ninth': 9
+            };
+        
+            const timeValueText = query.match(/one|two|three|four|five|six|seven|eight|nine|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth/g);
+            if (timeValueText) {
+              timerId = [converttable[timeValueText[0]]];
+            }
+          }
+
+          if (timerId) {
+            // Cancel the timer with the given ID
+            cancelTimer(timerId[0], userId, connection, channel);
+          }
+          else {
+            // List the timers
+            if (alarms.length > 1){
+              sendToTTS(`Which one would you like to cancel? You have the following: ${alarms.map((alarm, index) => `${alarm.type} ${index + 1} set for ${alarm.time}`).join(', ')}`, userId, connection, channel);
+            }
+            else if (alarms.length === 1){
+              cancelTimer(1, userId, connection, channel);
+            }
+            else{
+              sendToTTS('There are no timers to cancel.', userId, connection, channel);
+            }
+          }
+
           restartListening(userId, connection, channel);
           return;
         }
@@ -381,7 +441,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       const pcmPath = fileName.replace('.mp3', '.pcm');  // Ensure we have the correct .pcm path
       fs.unlinkSync(pcmPath);
     } catch (cleanupError) {
-      logToConsole(`X Error cleaning up files: ${cleanupError.message}`, 'error', 1);
+      // Log cleanup errors but continue
     }
   }
 }
@@ -942,7 +1002,27 @@ async function setTimer(query, type = 'alarm', userid, connection, channel) {
   // Check for known time units (minutes, seconds, hours) with a number
   const timeUnits = ['minutes', 'minute', 'seconds', 'second', 'hours', 'hour'];
   const timeUnit = timeUnits.find(unit => query.includes(unit));
-  const timeValue = query.match(/\d+/);
+  let timeValue = query.match(/\d+/);
+
+  if (timeUnit && !timeValue) {
+    // Time value is maybe in text form. Try to convert it to a number
+    const converttable = {
+      'one': 1,
+      'two': 2,
+      'three': 3,
+      'four': 4,
+      'five': 5,
+      'six': 6,
+      'seven': 7,
+      'eight': 8,
+      'nine': 9
+    };
+
+    const timeValueText = query.match(/\b(one|two|three|four|five|six|seven|eight|nine)\b/);
+    if (timeValueText) {
+      timeValue = [converttable[timeValueText[0]]];
+    }
+  }
 
   if (!timeUnit || !timeValue) {
     sendToTTS('Sorry, I could not understand the requested timer.', userid, connection, channel);
@@ -951,16 +1031,45 @@ async function setTimer(query, type = 'alarm', userid, connection, channel) {
 
   const time = parseInt(timeValue[0]);
   const ms = timeUnit.includes('minute') ? time * 60000 : timeUnit.includes('second') ? time * 1000 : time * 3600000;
+  const endTime = new Date(Date.now() + ms);
+  const formattedTime = endTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
 
   sendToTTS(`${type} set for ${time} ${timeUnit}`, userid, connection, channel);
-  logToConsole(`> Timer set for ${time} ${timeUnit}`, 'info', 1);
-  setTimeout(() => {
+  logToConsole(`> ${type} set for ${time} ${timeUnit}`, 'info', 1);
+
+  const timeoutId = setTimeout(() => {
     alarmongoing = true;
     playSound(connection, type, process.env.ALARM_VOLUME);
     logToConsole('> Timer finished.', 'info', 1);
   }, ms);
+  alarms.push({ id: timeoutId, time: formattedTime, type: type });
+}
 
-  restartListening(userid, connection, channel);
+function cancelTimer(alarmIndex, userid, connection, channel) {
+  const index = (parseInt(alarmIndex) - 1);
+  if (index < alarms.length) {
+    clearTimeout(alarms[index].id);
+    logToConsole(`> ${alarms[index].type} for ${alarms[index].time} cancelled`, 'info', 1);
+    sendToTTS(`${alarms[index].type} for ${alarms[index].time} cancelled.`, userid, connection, channel);
+    // Remove the alarm from the list, reindexing the array
+    alarms = alarms.filter((alarm, i) => i !== index);
+  }
+  else{
+    logToConsole(`X Timer index not found: ${index}`, 'error', 1);
+    sendToTTS(`I could not find a ${alarms[index].type} for this time.`, userid, connection, channel);
+  }
+}
+
+function listTimers(userid, connection, channel) {
+  if (alarms.length > 1){
+    sendToTTS(`You have the following: ${alarms.map((alarm, index) => `${alarm.type} ${index + 1} set for ${alarm.time}`).join(', ')}`, userid, connection, channel);
+  }
+  else if (alarms.length === 1){
+    sendToTTS(`You have a ${alarms[0].type} set for ${alarms[0].time}.`, userid, connection, channel);
+  }
+  else{
+    sendToTTS('There are no timers set.', userid, connection, channel);
+  }
 }
 
 async function captionImage(imageUrl, userId, connection, channel) {
