@@ -161,9 +161,9 @@ client.on('messageCreate', async message => {
   }
 });
 
-// If bot is in voice channel and a user joins, start listening to them
+// If bot is in voice channel and a user joins, start listening to them (except for itself)
 client.on('voiceStateUpdate', (oldState, newState) => {
-  if (connection && newState.channelId === connection.joinConfig.channelId) {
+  if (connection && newState.channelId === connection.joinConfig.channelId && newState.member.user.id !== client.user.id) {
     logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
     handleRecordingForUser(newState.member.user.id, connection, newState.channel);
   }
