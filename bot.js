@@ -167,12 +167,20 @@ client.on('messageCreate', async message => {
 });
 
 // If bot is in voice channel and a user joins, start listening to them (except for itself)
-// client.on('voiceStateUpdate', (oldState, newState) => {
-//   if (connection && newState.channelId === connection.joinConfig.channelId && newState.member.user.id !== client.user.id) {
-//     logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
-//     handleRecordingForUser(newState.member.user.id, connection, newState.channel);
-//   }
-// });
+client.on('voiceStateUpdate', (oldState, newState) => {
+  // Check if the user has joined a new channel (and it's the specific channel the bot is in)
+  // and ensure the user is not the bot itself
+  if (connection &&
+      oldState.channelId !== newState.channelId &&
+      newState.channelId === connection.joinConfig.channelId &&
+      newState.member.user.id !== client.user.id) {
+    // Additional check to ensure the user is not just unmuting/muting or performing other state changes
+    if (newState.channelId !== null) { // User has joined the channel (not just updated their state in the same channel)
+      logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
+      handleRecordingForUser(newState.member.user.id, connection, newState.channel);
+    }
+  }
+});
 
 function handleRecording(connection, channel) {
   const receiver = connection.receiver;
