@@ -69,6 +69,11 @@ client.on('ready', () => {
 client.on('messageCreate', async message => {
   switch (message.content.split(' ')[0]) {
     case '>join':
+      if (connection) {
+        message.reply('I am already in a voice channel. Please use the `>leave` command first.');
+        return;
+      }
+
       allowwithoutbip = false;
       allowwithouttrigger = false;
 
@@ -162,12 +167,12 @@ client.on('messageCreate', async message => {
 });
 
 // If bot is in voice channel and a user joins, start listening to them (except for itself)
-client.on('voiceStateUpdate', (oldState, newState) => {
-  if (connection && newState.channelId === connection.joinConfig.channelId && newState.member.user.id !== client.user.id) {
-    logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
-    handleRecordingForUser(newState.member.user.id, connection, newState.channel);
-  }
-});
+// client.on('voiceStateUpdate', (oldState, newState) => {
+//   if (connection && newState.channelId === connection.joinConfig.channelId && newState.member.user.id !== client.user.id) {
+//     logToConsole(`> User joined voice channel: ${newState.member.user.username}`, 'info', 1);
+//     handleRecordingForUser(newState.member.user.id, connection, newState.channel);
+//   }
+// });
 
 function handleRecording(connection, channel) {
   const receiver = connection.receiver;
