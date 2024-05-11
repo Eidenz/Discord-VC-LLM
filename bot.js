@@ -34,7 +34,6 @@ logToConsole(`Bot triggers: ${botnames}`, 'info', 1);
 let chatHistory = {};
 
 let transcribemode = false;
-let transcriptionfile = '';
 
 let allowwithouttrigger = false;
 let allowwithoutbip = false;
@@ -295,25 +294,6 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       return;
     }
 
-    // Check if transcription is a command
-    if (transcriptionwithoutpunctuation.includes("reset") && transcriptionwithoutpunctuation.includes("chat") && transcriptionwithoutpunctuation.includes("history")) {
-      playSound(connection, 'command');
-      currentlythinking = false;
-      chatHistory = {};
-      logToConsole('> Chat history reset!', 'info', 1);
-      restartListening(userId, connection, channel);
-      return;
-    }
-    else if (transcriptionwithoutpunctuation.includes("leave") && transcriptionwithoutpunctuation.includes("voice") && transcriptionwithoutpunctuation.includes("chat")) {
-      playSound(connection, 'command');
-      currentlythinking = false;
-      connection.destroy();
-      connection = null;
-      chatHistory = {};
-      logToConsole('> Left voice channel', 'info', 1);
-      return;
-    }
-
     // Check if the transcription includes the bot's name
     if (botnames.some(name => {
       const regex = new RegExp(`\\b${name}\\b`, 'i');
@@ -332,7 +312,26 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
           transcription = transcription.replace(new RegExp(`\\b${name}\\b`, 'i'), '').trim();
         }
 
-        // CHeck if transcription is requesting a song
+        // Check if transcription is a command
+        if (transcriptionwithoutpunctuation.includes("reset") && transcriptionwithoutpunctuation.includes("chat") && transcriptionwithoutpunctuation.includes("history")) {
+          playSound(connection, 'command');
+          currentlythinking = false;
+          chatHistory = {};
+          logToConsole('> Chat history reset!', 'info', 1);
+          restartListening(userId, connection, channel);
+          return;
+        }
+        else if (transcriptionwithoutpunctuation.includes("leave") && transcriptionwithoutpunctuation.includes("voice") && transcriptionwithoutpunctuation.includes("chat")) {
+          playSound(connection, 'command');
+          currentlythinking = false;
+          connection.destroy();
+          connection = null;
+          chatHistory = {};
+          logToConsole('> Left voice channel', 'info', 1);
+          return;
+        }
+
+        // Check for specific triggers
         const songTriggers = [['play', 'song'], ['play', 'youtube']];
         const timerTriggers = [['set', 'timer'], ['start', 'timer'], ['set', 'alarm'], ['start', 'alarm']];
         const internetTriggers = ['search', 'internet'];
