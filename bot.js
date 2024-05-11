@@ -9,8 +9,6 @@ const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
-const { send } = require('process');
-const { log } = require('console');
 
 let alarms = [];
 
@@ -137,6 +135,7 @@ client.on('messageCreate', async message => {
           });
         }
 
+        connection = null;
         chatHistory = {};
         logToConsole('> Left voice channel', 'info', 1);
       }
@@ -309,6 +308,7 @@ async function sendAudioToAPI(fileName, userId, connection, channel) {
       playSound(connection, 'command');
       currentlythinking = false;
       connection.destroy();
+      connection = null;
       chatHistory = {};
       logToConsole('> Left voice channel', 'info', 1);
       return;
