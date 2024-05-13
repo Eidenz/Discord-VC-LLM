@@ -240,7 +240,6 @@ function convertAndHandleFile(filePath, userid, connection, channel) {
   ffmpeg(filePath)
   .inputFormat('s16le')
   .audioChannels(1)
-  .audioFrequency(48000)
   .format('mp3')
   .on('error', (err) => {
     logToConsole(`X Error converting file: ${err.message}`, 'error', 1);
