@@ -14,6 +14,7 @@ This Discord bot uses voice recognition to interact with users in a voice channe
 - Node.js and npm installed
 - A Discord Bot Token
 - Access to OpenAI compatible APIs for STT (Speech to Text), LLM, and TTS services (for fully local, checkout `openedai-whisper`, `ollama` and `openedai-speech`)
+- If you wish to use timer and alarms, you need a `alarm.mp3` and `timer.mp3` files in the `sounds` folder.
 
 ## Installation
 
