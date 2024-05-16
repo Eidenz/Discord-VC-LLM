@@ -736,14 +736,17 @@ async function sendToLLMInThread(message, threadId) {
   if (!threadMemory[threadId]) {
     threadMemory[threadId] = [];
 
-    // Add the full thread history to the thread memory
-    const threadMessages = await message.channel.messages.fetch();
+    // Fetch the last 20 messages from the thread
+    const threadMessages = await message.channel.messages.fetch({ limit: 20 });
     threadMessages.forEach(threadMessage => {
       threadMemory[threadId].push({
         role: threadMessage.author.id === client.user.id ? 'assistant' : 'user',
         content: threadMessage.content
       });
     });
+
+    // Reverse the messages to maintain the correct order
+    threadMemory[threadId].reverse();
   }
 
   // Define the system message
