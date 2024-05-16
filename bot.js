@@ -28,17 +28,17 @@ const youtube = google.youtube({
 });
 
 // Call the command registration script
-// exec(`node ${path.join(__dirname, 'registerCommands.js')}`, (error, stdout, stderr) => {
-//   if (error) {
-//     logToConsole(`Error registering commands: ${error.message}`, 'error', 1);
-//     return;
-//   }
-//   if (stderr) {
-//     logToConsole(`Error output: ${stderr}`, 'error', 1);
-//     return;
-//   }
-//   logToConsole(`Command registration output: ${stdout}`, 'info', 2);
-// });
+exec(`node ${path.join(__dirname, 'registerCommands.js')}`, (error, stdout, stderr) => {
+  if (error) {
+    logToConsole(`Error registering commands: ${error.message}`, 'error', 1);
+    return;
+  }
+  if (stderr) {
+    logToConsole(`Error output: ${stderr}`, 'error', 1);
+    return;
+  }
+  logToConsole(`Command registration output: ${stdout}`, 'info', 2);
+});
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const botnames = process.env.BOT_TRIGGERS.split(',');
