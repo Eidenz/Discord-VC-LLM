@@ -9,6 +9,8 @@ const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
+const { exec } = require('child_process');
+const path = require('path');
 const { log } = require('console');
 
 let alarms = [];
@@ -23,6 +25,19 @@ const client = new Client({
 const youtube = google.youtube({
   version: 'v3',
   auth: process.env.YOUTUBE_API
+});
+
+// Call the command registration script
+exec(`node ${path.join(__dirname, 'registerCommands.js')}`, (error, stdout, stderr) => {
+  if (error) {
+    logToConsole(`Error registering commands: ${error.message}`, 'error', 1);
+    return;
+  }
+  if (stderr) {
+    logToConsole(`Error output: ${stderr}`, 'error', 1);
+    return;
+  }
+  logToConsole(`Command registration output: ${stdout}`, 'info', 2);
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -63,6 +78,131 @@ client.on('ready', () => {
   });
 
   logToConsole(`Logged in as ${client.user.tag}!`, 'info', 1);
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand()) return;
+
+  const { commandName, options } = interaction;
+
+  switch (commandName) {
+    case 'join':
+      const mode = options.getString('mode');
+      // Your join logic here, using `mode` as the option
+      if (connection) {
+        await interaction.reply({ content: 'I am already in a voice channel. Please use the `leave` command first.', ephemeral: true });
+        return;
+      }
+
+      allowwithoutbip = false;
+      allowwithouttrigger = false;
+      transcribemode = false;
+
+      if (mode === 'silent') {
+        allowwithoutbip = true;
+      } else if (mode === 'free') {
+        allowwithouttrigger = true;
+      } else if (mode === 'transcribe') {
+        transcribemode = true;
+      }
+
+      if (interaction.member.voice.channel) {
+        connection = joinVoiceChannel({
+          channelId: interaction.member.voice.channel.id,
+          guildId: interaction.guild.id,
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfDeaf: false,
+        });
+        if (transcribemode) {
+          sendToTTS('Transcription mode is enabled for this conversation. Once you type the leave command, a transcription of the conversation will be sent in the channel.', interaction.user.id, connection, interaction.member.voice.channel);
+        }
+        logToConsole('> Joined voice channel', 'info', 1);
+        handleRecording(connection, interaction.member.voice.channel);
+        await interaction.reply({ content: 'Joined voice channel.', ephemeral: true });
+      } else {
+        await interaction.reply({ content: 'You need to join a voice channel first!', ephemeral: true });
+      }
+      break;
+
+    case 'reset':
+      chatHistory = {};
+      await interaction.reply({ content: 'Chat history reset!', ephemeral: true });
+      logToConsole('> Chat history reset!', 'info', 1);
+      break;
+
+    case 'play':
+      const query = options.getString('query');
+      if (interaction.member.voice.channel) {
+        currentlythinking = true;
+        seatchAndPlayYouTube(query, interaction.user.id, connection, interaction.member.voice.channel);
+        await interaction.reply(`Playing: ${query}`);
+      } else {
+        await interaction.reply({ content: 'You need to join a voice channel first!', ephemeral: true });
+      }
+      break;
+
+    case 'leave':
+      if (connection) {
+        connection.destroy();
+        audioqueue = [];
+
+        if (transcribemode) {
+          await interaction.reply({ files: ['./transcription.txt'] }).then(() => {
+            fs.unlinkSync('./transcription.txt');
+          });
+        }
+
+        connection = null;
+        chatHistory = {};
+        logToConsole('> Left voice channel', 'info', 1);
+        await interaction.reply({ content: 'Left voice channel.', ephemeral: true });
+      } else {
+        await interaction.reply({ content: 'I am not in a voice channel.', ephemeral: true });
+      }
+      break;
+
+    case 'search':
+      const searchQuery = options.getString('query');
+      currentlythinking = true;
+      logToConsole(`> Search query: ${searchQuery}`, 'info', 1);
+
+      // Acknowledge the interaction immediately
+      await interaction.deferReply();
+
+      const response = await sendTextToPerplexity(searchQuery);
+      const messageParts = splitMessage(response);
+
+      for (const part of messageParts) {
+        try {
+          // Edit the initial deferred reply with the first part
+          await interaction.editReply(part);
+          // For subsequent parts, use follow-up messages
+          for (let i = 1; i < messageParts.length; i++) {
+            await interaction.followUp(messageParts[i]);
+          }
+        } catch (error) {
+          console.error(`Failed to send message part: ${error}`);
+          await interaction.followUp("Oops! I encountered an error while sending my response.");
+          break;
+        }
+      }
+      break;
+
+    case 'help':
+      await interaction.reply({ content: `Commands: \n
+      \`/join\` - Join voice channel and start listening for trigger words.
+      \`/join silent\` - Join voice channel without the confirmation sounds.
+      \`/join free\` - Join voice channel and listen without trigger words.
+      \`/join transcribe\` - Join voice channel and save the conversation to a file which will be sent when using \`/leave\` command.
+      \`/reset\` - Reset chat history. You may also say \`reset chat history\` in voice chat.
+      \`/play\` [song name or URL] - Play a song from YouTube. You may also say \`play [query] on YouTube\` or \`play [query] song\` with the bot trigger word.
+      \`/leave\` - Leave voice channel. You may also say \`leave voice chat\` in voice chat.
+      \`/help\` - Display this message. \n
+      __Notes:__
+      If vision is enabled, sending an image mentioning the bot will have it react to it in voice chat.
+      A valid API key is required for the YouTube feature.`, ephemeral: true });
+      break;
+  }
 });
 
 client.on('messageCreate', async message => {
@@ -154,97 +294,6 @@ client.on('messageCreate', async message => {
         break; // Stop sending more parts to avoid spamming in case of persistent errors
       }
     }
-  }
-
-  switch (message.content.split(' ')[0]) {
-    case '>join':
-      if (connection) {
-        message.reply('I am already in a voice channel. Please use the `>leave` command first.');
-        return;
-      }
-
-      allowwithoutbip = false;
-      allowwithouttrigger = false;
-
-      // Check if second argument is silent
-      if (message.content.split(' ')[1] === 'silent') {
-        allowwithoutbip = true;
-      }
-      else if (message.content.split(' ')[1] === 'free') {
-        allowwithouttrigger = true;
-      }
-      else if (message.content.split(' ')[1] === 'transcribe') {
-        transcribemode = true;
-      }
-
-      allowwithouttrigger = false;
-      if (message.member.voice.channel) {
-        // Delete user's message for spam
-        message.delete();
-
-        connection = joinVoiceChannel({
-          channelId: message.member.voice.channel.id,
-          guildId: message.guild.id,
-          adapterCreator: message.guild.voiceAdapterCreator,
-          selfDeaf: false,
-        });
-        if(transcribemode){
-          sendToTTS('Transcription mode is enabled for this conversation. Once you type the leave command, a transcription of the conversation will be sent in the channel.', message.author.id, connection, message.member.voice.channel);
-        }
-        logToConsole('> Joined voice channel', 'info', 1);
-        handleRecording(connection, message.member.voice.channel);
-      } else {
-        message.reply('You need to join a voice channel first!');
-      }
-      break;
-    case '>reset':
-      chatHistory = {};
-      message.reply('> Chat history reset!');
-      logToConsole('> Chat history reset!', 'info', 1);
-      break;
-    case '>play':
-      if (message.member.voice.channel) {
-        // Play YouTube video
-        currentlythinking = true;
-        seatchAndPlayYouTube(message.content.replace('>play', '').trim(), message.author.id, connection, message.member.voice.channel);
-      } else {
-        message.reply('You need to join a voice channel first!');
-      }
-      break;
-    case '>leave':
-      // Delete user's message for spam
-      message.delete();
-
-      if (connection) {
-        connection.destroy();
-        audioqueue = [];
-
-        if(transcribemode){
-          // Write the transcription to a file and send it to the channel
-          message.reply({ files: ['./transcription.txt'] }).then(() => {
-            fs.unlinkSync('./transcription.txt');
-          });
-        }
-
-        connection = null;
-        chatHistory = {};
-        logToConsole('> Left voice channel', 'info', 1);
-      }
-      break;
-    case '>help':
-      message.reply(`Commands: \n
-      \`>join\` - Join voice channel and start listening for trigger words.
-      \`>join silent\` - Join voice channel without the confirmation sounds.
-      \`>join free\` - Join voice channel and listen without trigger words.
-      \`>join transcribe\` - Join voice channel and save the conversation to a file which will be sent when using \`>leave\` command.
-      \`>reset\` - Reset chat history. You may also say \`reset chat history\` in voice chat.
-      \`>play\` [song name or URL] - Play a song from YouTube. You may also say \`play [query] on YouTube\` or \`play [query] song\` with the bot trigger word.
-      \`>leave\` - Leave voice channel. You may also say \`leave voice chat\` in voice chat.
-      \`>help\` - Display this message. \n
-      __Notes:__
-      If vision is enabled, sending an image mentioning the bot will have it react to it in voice chat.
-      A valid API key is required for the YouTube feature.`);
-      break;
   }
 
   // Check if the bot was mentioned with a picture attached
@@ -892,6 +941,54 @@ async function sendToPerplexity(transcription, userId, connection, channel) {
   } catch (error) {
     currentlythinking = false;
     logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
+  }
+}
+
+async function sendTextToPerplexity(transcription) {
+  let messages = [];
+
+  // Return error if perplexity key is missing
+  if (process.env.PERPLEXITY_API === undefined || process.env.PERPLEXITY_API === "" || process.env.PERPLEXITY_MODEL === "MY_PERPLEXITY_API_KEY") {
+    logToConsole('X Perplexity API key is missing', 'error', 1);
+    return "Sorry, I do not have access to internet. You may add a Perplexity API key to add this feature.";
+  }
+
+  // Refuse if perplexity is not allowed
+  if (process.env.PERPLEXITY === "false") {
+    logToConsole('X Perplexity is not allowed', 'error', 1);
+    return "Sorry, I am not allowed to search the internet.";
+  }
+
+  // Add the user's message to the chat history
+  messages.push({
+    role: 'user',
+    content: transcription
+  });
+
+  try {
+    const client = axios.create({
+      baseURL: process.env.PERPLEXITY_ENDPOINT,
+      headers: {
+        'Authorization': `Bearer ${process.env.PERPLEXITY_API}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // Chat completion without streaming
+    const response = await client.post('/chat/completions', {
+      model: process.env.PERPLEXITY_MODEL,
+      messages: messages,
+    });
+
+    const llmresponse = response.data.choices[0].message.content;
+    logToConsole(`> LLM Response: ${llmresponse}`, 'info', 1);
+
+    currentlythinking = false;
+    return llmresponse;
+  } catch (error) {
+    currentlythinking = false;
+    logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
+    return "Sorry, I am having trouble processing your request right now.";
   }
 }
 
