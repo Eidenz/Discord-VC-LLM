@@ -98,12 +98,11 @@ client.on('messageCreate', async message => {
       }
     }
   } else if (isReply) {
-    await message.channel.sendTyping();
-    logToConsole('> Reply to message', 'info', 1);
-
     // Continue the conversation
     const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
     if (repliedMessage.author.id !== client.user.id) return; // Only continue if replying to the bot's message
+    await message.channel.sendTyping();
+    logToConsole('> Reply to message', 'info', 1);
     const response = await sendTextToLLM(message);
     const messageParts = splitMessage(response);
 
