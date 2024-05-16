@@ -60,6 +60,24 @@ const commands = [
     ],
   },
   {
+    name: 'reminder',
+    description: 'Set a reminder',
+    options: [
+      {
+        type: 3, // STRING
+        name: 'time',
+        description: 'Time to remind, in timestamp format (e.g. <t:1715869560>)',
+        required: true,
+      },
+      {
+        type: 3, // STRING
+        name: 'message',
+        description: 'Message to remind',
+        required: true,
+      },
+    ],
+  },
+  {
     name: 'leave',
     description: 'Leave voice channel',
   },

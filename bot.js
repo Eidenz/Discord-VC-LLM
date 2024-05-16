@@ -28,17 +28,17 @@ const youtube = google.youtube({
 });
 
 // Call the command registration script
-exec(`node ${path.join(__dirname, 'registerCommands.js')}`, (error, stdout, stderr) => {
-  if (error) {
-    logToConsole(`Error registering commands: ${error.message}`, 'error', 1);
-    return;
-  }
-  if (stderr) {
-    logToConsole(`Error output: ${stderr}`, 'error', 1);
-    return;
-  }
-  logToConsole(`Command registration output: ${stdout}`, 'info', 2);
-});
+// exec(`node ${path.join(__dirname, 'registerCommands.js')}`, (error, stdout, stderr) => {
+//   if (error) {
+//     logToConsole(`Error registering commands: ${error.message}`, 'error', 1);
+//     return;
+//   }
+//   if (stderr) {
+//     logToConsole(`Error output: ${stderr}`, 'error', 1);
+//     return;
+//   }
+//   logToConsole(`Command registration output: ${stdout}`, 'info', 2);
+// });
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const botnames = process.env.BOT_TRIGGERS.split(',');
@@ -186,6 +186,25 @@ client.on('interactionCreate', async interaction => {
           break;
         }
       }
+      break;
+
+    case 'reminder':
+      const time = options.getString('time');
+      const message = options.getString('message');
+      const userid = interaction.user.id;
+
+      // We need to parse the "time" option to get the timestamp. The format is the official discord one, <t:UNIX_TIMESTAMP>.
+      const timestamp = time.match(/<t:(\d+)>/);
+      if (!timestamp || timestamp.length < 2) {
+        await interaction.reply({ content: `Incorrect timestamp format.`, ephemeral: true });
+        return;
+      }
+
+      // Schedule the reminder
+      scheduleReminder(timestamp[1], message, userid);
+
+      await interaction.reply({ content: `Reminder set for ${time}.`, ephemeral: true });
+
       break;
 
     case 'help':
@@ -1513,6 +1532,31 @@ async function isThreadFromBot(message) {
   if (!threadParentMessage) return false;
 
   return threadParentMessage.author.id === client.user.id;
+}
+
+async function scheduleReminder(timestamp, message, userId) {
+  // Calculate delay in ms between the current time and the reminder time
+  const currentTime = Date.now();
+  const reminderTime = timestamp * 1000; // Convert Unix timestamp (seconds) to JavaScript timestamp (milliseconds)
+  const delay = reminderTime - currentTime;
+
+  if (delay <= 0) {
+    client.users.fetch(userId)
+      .then(user => user.send(`⏰ You set a reminder in the past, sorry I cannot time travel yet!`))
+      .catch(error => console.error(`Failed to send reminder: ${error.message}`));
+    return;
+  }
+
+  // Set a timeout to send the reminder message
+  const timeoutId = setTimeout(() => {
+    // Send the reminder message in DM
+    client.users.fetch(userId)
+      .then(user => user.send(`⏰ Reminder: ${message}`))
+      .catch(error => console.error(`Failed to send reminder: ${error.message}`));
+  }, delay);
+
+  // Optionally, store the timeoutId if you need to clear it later
+  return timeoutId;
 }
 
 client.login(TOKEN);
