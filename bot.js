@@ -9,6 +9,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const prism = require('prism-media');
 const ytdl = require('ytdl-core');
 const { google } = require('googleapis');
+const { log } = require('console');
 
 let alarms = [];
 
@@ -32,6 +33,7 @@ if (!Array.isArray(botnames)) {
 }
 logToConsole(`Bot triggers: ${botnames}`, 'info', 1);
 let chatHistory = {};
+let threadMemory = {};
 
 let transcribemode = false;
 
@@ -64,6 +66,97 @@ client.on('ready', () => {
 });
 
 client.on('messageCreate', async message => {
+  // Ignore own messages
+  if (message.author.id === client.user.id) return;
+
+  const isMention = message.mentions.has(client.user);
+  const isReply = message.reference && message.reference.messageId;
+  const isInThread = message.channel.isThread() && await isThreadFromBot(message);
+
+  if (process.env.LLM_TEXT.toLowerCase() === "false") {
+    isMention = false;
+    isReply = false;
+    isInThread = false;
+  }
+
+  if (isInThread) {
+    const threadId = message.channel.isThread() ? message.channel.id : null;
+    
+    await message.channel.sendTyping();
+    logToConsole('> Message in thread', 'info', 1);
+    // Handle messages within a thread
+    const response = await sendToLLMInThread(message, threadId);
+    const messageParts = splitMessage(response);
+
+    for (const part of messageParts) {
+      try {
+        await message.channel.send(part);
+      } catch (error) {
+        console.error(`Failed to send message part: ${error}`);
+        await message.channel.send("Oops! I encountered an error while sending my response.");
+        break;
+      }
+    }
+  } else if (isReply) {
+    await message.channel.sendTyping();
+    logToConsole('> Reply to message', 'info', 1);
+
+    // Continue the conversation
+    const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+    if (repliedMessage.author.id !== client.user.id) return; // Only continue if replying to the bot's message
+    const response = await sendTextToLLM(message);
+    const messageParts = splitMessage(response);
+
+    // Send the first part as a reply
+    try {
+      await message.reply(messageParts[0]);
+    } catch (error) {
+      console.error(`Failed to send reply: ${error}`);
+      await message.channel.send("Oops! I encountered an error while sending my response.");
+      return; // Stop further processing if the reply fails
+    }
+
+    // Send the remaining parts as regular messages
+    for (let i = 1; i < messageParts.length; i++) {
+      try {
+        await message.channel.send(messageParts[i]);
+      } catch (error) {
+        console.error(`Failed to send message part: ${error}`);
+        // Optionally, send a message to the channel indicating an error occurred
+        await message.channel.send("Oops! I encountered an error while sending my response.");
+        break; // Stop sending more parts to avoid spamming in case of persistent errors
+      }
+    }
+  } else if (isMention) {
+    await message.channel.sendTyping();
+    logToConsole('> Mentioned in message', 'info', 1);
+
+    // Start a new conversation
+    const response = await sendTextToLLM(message);
+    const messageParts = splitMessage(response);
+
+    // Send the first part as a reply
+    try {
+      await message.reply(messageParts[0]);
+    } catch (error) {
+      console.error(`Failed to send reply: ${error}`);
+      await message.channel.send("Oops! I encountered an error while sending my response.");
+      return; // Stop further processing if the reply fails
+    }
+
+    // Send the remaining parts as regular messages
+    for (let i = 1; i < messageParts.length; i++) {
+      try {
+        await message.channel.send(messageParts[i]);
+      } catch (error) {
+        console.error(`Failed to send message part: ${error}`);
+        // Optionally, send a message to the channel indicating an error occurred
+        await message.channel.send("Oops! I encountered an error while sending my response.");
+        break; // Stop sending more parts to avoid spamming in case of persistent errors
+      }
+    }
+  }
+
   switch (message.content.split(' ')[0]) {
     case '>join':
       if (connection) {
@@ -560,6 +653,165 @@ async function sendToLLM(transcription, userId, connection, channel) {
   } catch (error) {
     currentlythinking = false;
     logToConsole(`X Failed to communicate with LLM: ${error.message}`, 'error', 1);
+  }
+}
+
+async function sendTextToLLM(message) {
+  // Define the system message
+  const systemMessage = {
+    role: 'system',
+    content: process.env.LLM_TEXT_SYSTEM_PROMPT
+  };
+
+  const messages = [];
+
+  // Fetch the message chain
+  let currentMessage = message;
+  const messageChain = [];
+
+  while (currentMessage) {
+    messageChain.push({
+      role: currentMessage.author.id === client.user.id ? 'assistant' : 'user',
+      content: currentMessage.content
+    });
+    if (currentMessage.reference) {
+      try {
+        currentMessage = await message.channel.messages.fetch(currentMessage.reference.messageId);
+      } catch (error) {
+        if (error.code === 10008) {
+          console.error(`Failed to fetch message: ${error.message}`);
+          break; // Exit the loop if the message is not found
+        } else {
+          throw error; // Re-throw other errors
+        }
+      }
+    } else {
+      currentMessage = null;
+    }
+  }
+
+  // Reverse the message chain to maintain the correct order
+  messageChain.reverse();
+
+  // Add the message chain to the messages array
+  messages.push(...messageChain);
+
+  // Keep only the latest X messages, excluding the system message in the count
+  const messageCount = messages.length;
+  if (messageCount >= process.env.MEMORY_SIZE) {
+    // Slice the messages to keep only the latest X, considering the system message will be added
+    messages = messages.slice(-(process.env.MEMORY_SIZE - 1));
+  }
+
+  // Add the system message at the beginning of the array
+  messages.unshift(systemMessage);
+
+  try {
+    const client = axios.create({
+      baseURL: process.env.LLM_ENDPOINT,
+      headers: {
+        'Authorization': `Bearer ${process.env.LLM_API}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // Chat completion without streaming
+    const response = await client.post('/chat/completions', {
+      model: process.env.LLM,
+      messages: messages,
+    });
+
+    const llmresponse = response.data.choices[0].message.content;
+
+    logToConsole(`> LLM Text Response: ${llmresponse}`, 'info', 1);
+
+    return llmresponse;
+  } catch (error) {
+    console.error(`Failed to communicate with LLM: ${error.message}`);
+    return 'Sorry, I am having trouble processing your request right now.';
+  }
+}
+
+async function sendToLLMInThread(message, threadId) {
+  // Initialize thread memory if it doesn't exist
+  if (!threadMemory[threadId]) {
+    threadMemory[threadId] = [];
+
+    // Add the full thread history to the thread memory
+    const threadMessages = await message.channel.messages.fetch();
+    threadMessages.forEach(threadMessage => {
+      threadMemory[threadId].push({
+        role: threadMessage.author.id === client.user.id ? 'assistant' : 'user',
+        content: threadMessage.content
+      });
+    });
+  }
+
+  // Define the system message
+  const systemMessage = {
+    role: 'system',
+    content: process.env.LLM_TEXT_SYSTEM_PROMPT
+  };
+
+  const messages = threadMemory[threadId];
+
+  // Fetch the original message of the thread
+  const threadParentMessage = await message.channel.fetchStarterMessage();
+  if (threadParentMessage) {
+    messages.push({
+      role: threadParentMessage.author.id === client.user.id ? 'assistant' : 'user',
+      content: threadParentMessage.content
+    });
+  }
+
+  // Add the message to the messages array
+  messages.push({
+    role: message.author.id === client.user.id ? 'assistant' : 'user',
+    content: message.content
+  });
+
+  // Keep only the latest X messages, excluding the system message in the count
+  const messageCount = messages.length;
+  if (messageCount >= process.env.MEMORY_SIZE) {
+    // Slice the messages to keep only the latest X, considering the system message will be added
+    messages = messages.slice(-(process.env.MEMORY_SIZE - 1));
+  }
+
+  // Update the thread memory
+  threadMemory[threadId] = messages;
+
+  // Add the system message at the beginning of the array
+  messages.unshift(systemMessage);
+
+  try {
+    const client = axios.create({
+      baseURL: process.env.LLM_ENDPOINT,
+      headers: {
+        'Authorization': `Bearer ${process.env.LLM_API}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // Chat completion without streaming
+    const response = await client.post('/chat/completions', {
+      model: process.env.LLM,
+      messages: messages,
+    });
+
+    const llmresponse = response.data.choices[0].message.content;
+
+    // Add LLM response to the thread memory
+    threadMemory[threadId].push({
+      role: 'assistant',
+      content: llmresponse
+    });
+
+    logToConsole(`> LLM Text Response: ${llmresponse}`, 'info', 1);
+
+    return llmresponse;
+  } catch (error) {
+    console.error(`Failed to communicate with LLM: ${error.message}`);
+    return 'Sorry, I am having trouble processing your request right now.';
   }
 }
 
@@ -1128,6 +1380,40 @@ async function captionImage(imageUrl, userId, connection, channel) {
       logToConsole(`X Failed to caption image: ${error.message}`, 'error', 1);
       sendToTTS('Sorry, I cannot see the image.', userId, connection, channel);
   }
+}
+
+function splitMessage(message, limit = 2000) {
+  const parts = [];
+  let currentPart = "";
+
+  // Split the message by spaces to avoid breaking words
+  const words = message.split(' ');
+
+  words.forEach(word => {
+    if (currentPart.length + word.length + 1 > limit) {
+      // When adding the next word exceeds the limit, push the current part to the array
+      parts.push(currentPart);
+      currentPart = "";
+    }
+    // Add the word to the current part
+    currentPart += (currentPart.length > 0 ? " " : "") + word;
+  });
+
+  // Push the last part
+  if (currentPart.length > 0) {
+    parts.push(currentPart);
+  }
+
+  return parts;
+}
+
+async function isThreadFromBot(message) {
+  if (!message.channel.isThread()) return false;
+
+  const threadParentMessage = await message.channel.fetchStarterMessage();
+  if (!threadParentMessage) return false;
+
+  return threadParentMessage.author.id === client.user.id;
 }
 
 client.login(TOKEN);
