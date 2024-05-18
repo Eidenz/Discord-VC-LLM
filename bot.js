@@ -228,6 +228,15 @@ client.on('messageCreate', async message => {
   // Ignore own messages
   if (message.author.id === client.user.id) return;
 
+  // Check if the bot was mentioned with a picture attached
+  if (message.member.voice.channel && message.mentions.has(client.user) && message.attachments.size > 0) {
+    // Get image URL from the message
+    const imageUrl = message.attachments.first().url;
+    const userId = message.author.id;
+    captionImage(imageUrl, userId, connection, message.member.voice.channel);
+    return;
+  }
+
   const isMention = message.mentions.has(client.user);
   const isReply = message.reference && message.reference.messageId;
   const isInThread = message.channel.isThread() && await isThreadFromBot(message);
@@ -313,14 +322,6 @@ client.on('messageCreate', async message => {
         break; // Stop sending more parts to avoid spamming in case of persistent errors
       }
     }
-  }
-
-  // Check if the bot was mentioned with a picture attached
-  if (message.member.voice.channel && message.mentions.has(client.user) && message.attachments.size > 0) {
-    // Get image URL from the message
-    const imageUrl = message.attachments.first().url;
-    const userId = message.author.id;
-    captionImage(imageUrl, userId, connection, message.member.voice.channel);
   }
 });
 
