@@ -225,8 +225,8 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async message => {
-  // Ignore own messages
-  if (message.author.id === client.user.id) return;
+  // Ignore own messages and system messages
+  if (message.author.id === client.user.id || message.system) return;
 
   // Check if the bot was mentioned with a picture attached
   if (message.mentions.has(client.user) && message.attachments.size > 0 && message.member.voice.channel) {
@@ -816,6 +816,10 @@ async function sendToLLMInThread(message, threadId) {
 
     // Reverse the messages to maintain the correct order
     threadMemory[threadId].reverse();
+
+    // Delete first two messages due to the system message and the message that triggered the thread
+    threadMemory[threadId].shift();
+    threadMemory[threadId].shift();
   }
 
   // Define the system message
@@ -824,7 +828,7 @@ async function sendToLLMInThread(message, threadId) {
     content: process.env.LLM_TEXT_SYSTEM_PROMPT
   };
 
-  const messages = threadMemory[threadId];
+  let messages = threadMemory[threadId];
 
   // Fetch the original message of the thread
   const threadParentMessage = await message.channel.fetchStarterMessage();
@@ -853,6 +857,8 @@ async function sendToLLMInThread(message, threadId) {
 
   // Add the system message at the beginning of the array
   messages.unshift(systemMessage);
+
+  console.log(messages);
 
   try {
     const client = axios.create({
