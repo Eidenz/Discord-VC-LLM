@@ -229,7 +229,7 @@ client.on('messageCreate', async message => {
   if (message.author.id === client.user.id) return;
 
   // Check if the bot was mentioned with a picture attached
-  if (message.member.voice.channel && message.mentions.has(client.user) && message.attachments.size > 0) {
+  if (message.mentions.has(client.user) && message.attachments.size > 0 && message.member.voice.channel) {
     // Get image URL from the message
     const imageUrl = message.attachments.first().url;
     const userId = message.author.id;
@@ -731,7 +731,7 @@ async function sendTextToLLM(message) {
     content: process.env.LLM_TEXT_SYSTEM_PROMPT
   };
 
-  const messages = [];
+  let messages = [];
 
   // Fetch the message chain
   let currentMessage = message;
